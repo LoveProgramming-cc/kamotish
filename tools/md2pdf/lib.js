@@ -8,6 +8,14 @@ const md = new MarkdownIt({ html: true, linkify: true, typographer: false })
   .use(texmath, { engine: katex, delimiters: ['dollars', 'brackets'], katexOptions: { throwOnError: false } })
   .use(require('../../web/markdown-it-kamotish.js'), Kamotish);
 
+// ```latex / ```tex / ```math / ```katex code blocks are display formulas, not code
+const MATH_FENCES = ['latex', 'tex', 'math', 'katex'], fence = md.renderer.rules.fence;
+md.renderer.rules.fence = (tokens, i, options, env, self) => {
+  const t = tokens[i];
+  if (!MATH_FENCES.includes(t.info.trim().split(/\s+/)[0].toLowerCase())) return fence(tokens, i, options, env, self);
+  return '<div class="math-block">' + katex.renderToString(t.content, { displayMode: true, throwOnError: false }) + '</div>\n';
+};
+
 const KATEX_CSS = require.resolve('katex/dist/katex.min.css');
 const KATEX_DIR = require('path').dirname(KATEX_CSS);
 
@@ -37,7 +45,7 @@ blockquote { margin: .8em 0; padding: .1em 1em; border-left: 3px solid #ccc; col
 hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
 img { max-width: 100%; }
 .kamo-err { color: #c00; background: #fee; }
-eq { display: inline; } eqn { display: block; overflow-x: auto; }
+eq { display: inline; } eqn, .math-block { display: block; overflow-x: auto; margin: .8em 0; break-inside: avoid; }
 </style></head><body>
 ${md.render(mdText)}
 </body></html>`;

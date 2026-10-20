@@ -66,7 +66,7 @@ code { background: rgba(128,128,128,.15); padding: 1px 5px; border-radius: 4px; 
 .doc hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
 .doc img { max-width: 100%; }
 .doc .kamo-err { color: #c00; background: #fee; }
-.doc eqn { display: block; overflow-x: auto; }
+.doc eqn, .doc .math-block { display: block; overflow-x: auto; margin: .8em 0; break-inside: avoid; }
 
 @media print {
   body { background: #fff; }
@@ -171,6 +171,13 @@ $('src').addEventListener('input', live); live();
 const md = window.markdownit({ html: true, linkify: true })
   .use(window.texmath, { engine: window.katex, delimiters: ['dollars', 'brackets'], katexOptions: { throwOnError: false } })
   .use(window.markdownitKamotish, window.Kamotish);
+// ```latex / ```tex / ```math / ```katex code blocks are display formulas, not code
+const MATH_FENCES = ['latex', 'tex', 'math', 'katex'], fence = md.renderer.rules.fence;
+md.renderer.rules.fence = (tokens, i, options, env, self) => {
+  const t = tokens[i];
+  if (!MATH_FENCES.includes(t.info.trim().split(/\s+/)[0].toLowerCase())) return fence(tokens, i, options, env, self);
+  return '<div class="math-block">' + katex.renderToString(t.content, { displayMode: true, throwOnError: false }) + '</div>\n';
+};
 const docs = []; let current = null;
 const CN = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
 const sortKey = n => n.replace(/[一二三四五六七八九十]+/g, m => String(m.length === 1 ? CN[m] : m === '十' ? 10 : (m[0] === '十' ? 10 + CN[m[1]] : CN[m[0]] * 10 + (CN[m[2]] || 0))).padStart(3, '0'));
