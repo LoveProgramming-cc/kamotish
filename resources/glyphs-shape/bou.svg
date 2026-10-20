@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="3">
+<path d="M14.00 32.00L74.00 32.00"/>
+<path d="M38.00 10.00L38.00 90.00"/>
+<path d="M22.00 48.00C42.00 48.00 54.00 62.00 64.00 80.00C68.00 88.00 76.00 92.00 90.00 90.00"/>
+<path d="M22.00 48.00C14.27 48.00 8.00 54.27 8.00 62.00C8.00 77.46 17.85 90.00 30.00 90.00C42.15 90.00 52.00 81.94 52.00 72.00L52.00 58.00"/>
+<path d="M64.00 46.00C64.00 54.00 62.00 62.00 58.00 68.00"/>
+</g>
+</svg>

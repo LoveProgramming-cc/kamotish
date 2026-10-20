@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh"><meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  body { width: 270px; margin: 0; padding: 14px 16px; font: 14px/1.5 system-ui, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  h1 { font-size: 15px; margin: 0 0 10px; }
+  label { display: flex; align-items: center; gap: 8px; padding: 5px 0; cursor: pointer; }
+  .st { opacity: .7; font-size: 12.5px; margin: 8px 0 10px; min-height: 18px; }
+  button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #8884; background: transparent; color: inherit; cursor: pointer; }
+  code { background: #8882; padding: 1px 4px; border-radius: 4px; }
+  p.h { margin: 12px 0 0; font-size: 12px; opacity: .7; }
+</style>
+<h1>卡谋语渲染</h1>
+<label><input type="checkbox" id="on"> 启用</label>
+<label><input type="checkbox" id="site"> 在 <b id="host">本站</b> 上启用</label>
+<div class="st" id="st"></div>
+<button id="rescan">重新扫描本页</button>
+<p class="h">在任意文字里写 <code>\kamotish{ma-tas-jian}</code>。括号里要写 <code>{ } \</code> 时用 <code>\{ \} \\</code>。</p>
+<script src="popup.js"></script>
+</html>

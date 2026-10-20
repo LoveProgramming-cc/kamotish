@@ -1,0 +1,20 @@
+{
+  "name": "kamotish-md2pdf",
+  "version": "1.0.0",
+  "description": "Markdown (with \\kamotish{} and math) to PDF: web GUI and command line",
+  "main": "lib.js",
+  "scripts": {
+    "start": "node server.js",
+    "md2pdf": "node md2pdf.js"
+  },
+  "author": "Koen Tsao",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "katex": "0.16.47",
+    "markdown-it": "14.3.3",
+    "markdown-it-texmath": "1.0.0",
+    "puppeteer-core": "23.11.1"
+  },
+  "private": true
+}

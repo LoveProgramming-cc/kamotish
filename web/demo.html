@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卡谋语 · 实时渲染</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fbf8ef; --fg:#222; --card:#fff; --line:#ddd; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#181816; --fg:#e8e6df; --card:#22221f; --line:#3a3a35; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 "Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif; }
+  main { max-width:880px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:20px; font-weight:600; margin:0 0 4px; }
+  p.sub { margin:0 0 20px; opacity:.7; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:16px; }
+  textarea { width:100%; box-sizing:border-box; min-height:150px; padding:10px; border:1px solid var(--line); border-radius:8px;
+             background:transparent; color:inherit; font:14px/1.5 ui-monospace,Menlo,Consolas,monospace; resize:vertical; }
+  kamo-text { font-size:34px; line-height:2.1; }
+  label { font-size:13px; opacity:.7; display:block; margin-bottom:6px; }
+  .row { display:flex; gap:12px; align-items:center; margin-top:10px; font-size:13px; }
+  code { background:rgba(128,128,128,.15); padding:1px 5px; border-radius:4px; }
+</style>
+<main>
+  <h1>卡谋语 · 实时渲染</h1>
+  <p class="sub">在下面输入文字，立刻显示。写法见《卡谋语书写说明》。</p>
+
+  <div class="card">
+    <label for="src">输入</label>
+    <textarea id="src" spellcheck="false"># ka-mo-yu
+
+我叫 ma-tas-jian，他叫 su-kun-liang。
+
+\mou\1 是单独的字素，\wou\2 和 \hou2 也是。
+
+shao xing moist oits tsao ma--tas an a in e</textarea>
+    <div class="row"><label style="margin:0">字号</label>
+      <input id="size" type="range" min="18" max="72" value="34"> <span id="sizev">34px</span></div>
+  </div>
+
+  <div class="card"><kamo-text id="out"></kamo-text></div>
+
+  <div class="card"><label>直接写在页面里也可以</label>
+    <kamo-text style="font-size:30px">ni-hao，\mou\1 ma\1-tas\2-jian</kamo-text>
+    <div style="font-size:13px;opacity:.7;margin-top:6px"><code>&lt;kamo-text&gt;ni-hao ma-tas-jian&lt;/kamo-text&gt;</code></div></div>
+</main>
+<script src="kamotish.js"></script>
+<script>
+  const src = document.getElementById('src'), out = document.getElementById('out');
+  const size = document.getElementById('size'), sizev = document.getElementById('sizev');
+  const draw = () => { out.text = src.value; };
+  src.addEventListener('input', draw); draw();
+  size.addEventListener('input', () => { out.style.fontSize = size.value + 'px'; sizev.textContent = size.value + 'px'; });
+</script>
+</html>

@@ -1,0 +1,22 @@
+{
+ "scale": 3.066666666666667,
+ "dx_per_H": -0.05,
+ "dy_per_H": -0.03,
+ "note": "mark top-left = glyph (right + dx_per_H*H, top + dy_per_H*H); H = glyph height in the 100 box",
+ "t1": {
+  "w": 11.41,
+  "h": 15.7
+ },
+ "t2": {
+  "w": 18.61,
+  "h": 15.8
+ },
+ "t3": {
+  "w": 34.97,
+  "h": 30.25
+ },
+ "t4": {
+  "w": 27.09,
+  "h": 26.69
+ }
+}

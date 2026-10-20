@@ -1,0 +1,54 @@
+# 卡谋语 Kamotish
+
+卡谋语 (Kamotish) 是一种人造语言。本仓库是它的**文字渲染工具**：把用拉丁字母和 `\字素名` 写成的输入，渲染成卡谋语文字。
+
+```
+\kamotish{\mi\wou\3中国人\mou\2}      →  渲染成卡谋语文字
+```
+
+**在线使用**：<https://loveprogramming-cc.github.io/kamotish/>，可以试写卡谋语，也可以把 Markdown 导出成 PDF，不用安装任何东西。
+
+## 包含什么
+
+| 工具 | 用途 | 位置 |
+|---|---|---|
+| **渲染库** | 一个 JS 文件，没有依赖；网页引入后用 `<kamo-text>` 或 `Kamotish.render()` 显示卡谋语 | [`web/kamotish.js`](web/kamotish.js) |
+| **浏览器插件** | 任何网页 (聊天、文档、论坛) 里的 `\kamotish{…}` 自动显示成卡谋语；输入框里实时预览 | [`extension/`](extension/)、安装包在 [`dist/`](dist/) |
+| **Markdown → PDF** | 含卡谋语和数学公式的 Markdown 批量导出 PDF；有网页界面，也有命令行 | [`tools/md2pdf/`](tools/md2pdf/) |
+| **在线版** | 试写和 Markdown 转 PDF (浏览器打印) | [`site/`](site/)，自动部署到 GitHub Pages |
+| **markdown-it 插件** | 在自己的 markdown-it 项目里支持 `\kamotish{…}` | [`web/markdown-it-kamotish.js`](web/markdown-it-kamotish.js) |
+| **字形制作工具** | 从手写原稿到最终字形、再到渲染库的全部 Python 脚本 | [`tools/`](tools/) |
+
+## 文档
+
+- **[使用手册](docs/使用手册.md)**：输入方法、插件安装、Markdown 转 PDF、在自己的网页里使用、重新生成字形。
+- **[卡谋语书写说明](docs/卡谋语书写说明.md)**：完整的输入格式规范。这份文档是写给 AI 读的，把它交给 AI，AI 就能写出可以渲染的卡谋语。
+
+## 快速开始
+
+**本地 Markdown → PDF (网页界面)**：需要 [Node.js](https://nodejs.org/) 18 以上和 Google Chrome (或 Edge / Chromium)。
+
+```sh
+cd tools/md2pdf
+npm install
+npm start            # 打开 http://127.0.0.1:4747
+```
+
+在 macOS 上也可以直接双击 `tools/md2pdf/启动.command`。
+
+## 目录结构
+
+```
+web/            渲染库 kamotish.js、markdown-it 插件、演示页
+extension/      浏览器插件源码
+dist/           浏览器插件安装包 (zip)
+tools/          Python 字形工具 (生成 kamotish.js)
+tools/md2pdf/   Markdown → PDF (网页界面 + 命令行)
+site/           在线版页面 (GitHub Pages)
+docs/           使用手册、书写说明
+resources/      原稿、中间产物、样张、备份 (见 resources/README.md)
+```
+
+## 协议
+
+[MIT](LICENSE)。例外：`resources/fonts/` 里的霞鹜漫黑字体使用 SIL Open Font License 1.1。
