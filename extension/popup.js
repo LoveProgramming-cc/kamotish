@@ -24,6 +24,8 @@
     const set = new Set(v.disabledHosts); if ($('site').checked) set.delete(host); else set.add(host);
     chrome.storage.local.set({ disabledHosts: Array.from(set) }, () => setTimeout(refresh, 120));
   }));
+  chrome.storage.local.get({ previewMode: 'caret' }, v => { $('preview').value = v.previewMode; });
+  $('preview').addEventListener('change', () => chrome.storage.local.set({ previewMode: $('preview').value }));
   $('rescan').addEventListener('click', () => ask('rescan', () => setTimeout(refresh, 150)));
   refresh();
 })();

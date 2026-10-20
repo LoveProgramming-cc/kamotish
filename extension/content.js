@@ -138,8 +138,10 @@
     observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
 
-  // ---------------------------------------------------------------- live preview bar for text boxes
-  let bar = null, barBody = null, barTarget = null;
+  // ---------------------------------------------------------------- live preview for text boxes (like an IME candidate window)
+  // previewMode: 'caret' = only the \kamotish{…} the caret is in (next to the caret), 'all' = every piece in the box, 'off'
+  let previewMode = 'caret';
+  let bar = null, barBody = null, barTarget = null, barDismissed = null;
   const TEXT_INPUT = /^(text|search|url|email|tel|)$/i;
   function editableOf(t) {
     if (!t || t.nodeType !== 1) return null;
@@ -149,21 +151,67 @@
     if (t.isContentEditable) { let h = t; while (h.parentElement && h.parentElement.isContentEditable) h = h.parentElement; return h; }
     return null;
   }
-  function editableText(el) { return el.value !== undefined ? el.value : (el.innerText || el.textContent || ''); }
-  function previewItems(text) {                      // the whole text in order: plain pieces and rendered \kamotish{...}
-    const ms = findMatches(text), items = []; let pos = 0;
-    const plain = t => { if (t) items.push({ plain: t }); };
-    ms.forEach(m => { plain(text.slice(pos, m.start)); items.push({ content: m.content }); pos = m.end; });
-    const i = text.indexOf(MARK, pos);
-    if (i >= 0) {                                    // still being typed: no closing brace yet
-      plain(text.slice(pos, i));
-      let content = '';
-      for (let j = i + MARK.length; j < text.length; j++) {
-        if (text[j] === '\\' && j + 1 < text.length && '{}\\'.indexOf(text[j + 1]) >= 0) { content += text[++j]; } else content += text[j];
+  // the text before and after the caret
+  function aroundCaret(el) {
+    if (el.value !== undefined) { const p = el.selectionEnd == null ? el.value.length : el.selectionEnd; return [el.value.slice(0, p), el.value.slice(p)]; }
+    const sel = getSelection(); if (!sel || !sel.rangeCount || !el.contains(sel.focusNode)) return null;
+    const r1 = document.createRange(), r2 = document.createRange();
+    r1.selectNodeContents(el); r1.setEnd(sel.focusNode, sel.focusOffset);
+    r2.selectNodeContents(el); r2.setStart(sel.focusNode, sel.focusOffset);
+    return [r1.toString(), r2.toString()];
+  }
+  // the \kamotish{…} the caret is inside (or right after its closing brace): {content, pending}
+  function pieceAtCaret(before, after) {
+    const i = before.lastIndexOf(MARK); if (i < 0) return null;
+    let content = '', j = i + MARK.length;
+    for (; j < before.length; j++) {
+      const c = before[j];
+      if (c === '\\' && j + 1 < before.length && '{}\\'.indexOf(before[j + 1]) >= 0) { content += before[++j]; continue; }
+      if (c === '}') return j === before.length - 1 ? { content } : null;      // closed before the caret: only if just closed
+      content += c;
+    }
+    for (let k = 0; k < after.length && k < 400; k++) {
+      const c = after[k];
+      if (c === '\\' && k + 1 < after.length && '{}\\'.indexOf(after[k + 1]) >= 0) { content += after[++k]; continue; }
+      if (c === '}') return { content };
+      if (after.startsWith(MARK, k)) break;
+      content += c;
+    }
+    return { content, pending: true };
+  }
+  // every piece in the box (closed ones, plus one still being typed at the end)
+  function allPieces(text) {
+    const ms = findMatches(text), out = ms.map(m => ({ content: m.content }));
+    const last = ms.length ? ms[ms.length - 1].end : 0, i = text.indexOf(MARK, last);
+    if (i >= 0) out.push({ content: text.slice(i + MARK.length), pending: true });
+    return out;
+  }
+  // where the caret is on screen
+  const MIRROR_PROPS = ['boxSizing', 'width', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'paddingTop', 'paddingRight',
+    'paddingBottom', 'paddingLeft', 'fontStyle', 'fontVariant', 'fontWeight', 'fontStretch', 'fontSize', 'lineHeight', 'fontFamily', 'textAlign',
+    'textTransform', 'textIndent', 'letterSpacing', 'wordSpacing', 'tabSize', 'whiteSpace', 'wordBreak', 'overflowWrap'];
+  function caretRect(el) {
+    const box = el.getBoundingClientRect();
+    if (el.value === undefined) {
+      const sel = getSelection();
+      if (sel && sel.rangeCount) {
+        const r = sel.getRangeAt(0).cloneRange(); r.collapse(false);
+        const rs = r.getClientRects(), rr = rs.length ? rs[rs.length - 1] : r.getBoundingClientRect();
+        if (rr && (rr.top || rr.bottom)) return { left: rr.left, top: rr.top, bottom: rr.bottom || rr.top + 20 };
       }
-      items.push({ content, pending: true });
-    } else plain(text.slice(pos));
-    return items.some(it => !it.plain) ? items : [];
+      return { left: box.left, top: box.top, bottom: box.bottom };
+    }
+    const cs = getComputedStyle(el), m = document.createElement('div');
+    MIRROR_PROPS.forEach(p => { m.style[p] = cs[p]; });
+    Object.assign(m.style, { position: 'fixed', visibility: 'hidden', top: '0', left: '-9999px', overflow: 'hidden',
+      whiteSpace: el.nodeName === 'INPUT' ? 'pre' : 'pre-wrap', overflowWrap: el.nodeName === 'INPUT' ? 'normal' : 'break-word', width: box.width + 'px' });
+    m.textContent = el.value.slice(0, el.selectionEnd == null ? el.value.length : el.selectionEnd);
+    const s = document.createElement('span'); s.textContent = '​'; m.appendChild(s);
+    document.documentElement.appendChild(m);
+    const lh = s.offsetHeight || parseFloat(cs.fontSize) * 1.3;
+    const left = box.left + s.offsetLeft - el.scrollLeft, top = box.top + s.offsetTop - el.scrollTop;
+    m.remove();
+    return { left: Math.min(Math.max(left, box.left), box.right), top: Math.max(top, box.top), bottom: Math.min(top + lh, box.bottom) };
   }
   function ensureBar() {
     if (bar) return;
@@ -171,38 +219,48 @@
     const sr = bar.attachShadow({ mode: 'open' });
     sr.innerHTML = '<style>' + K.css +
       ':host{all:initial;position:fixed;z-index:2147483647;pointer-events:none;display:none}' +
-      '.b{box-sizing:border-box;max-height:7.5em;overflow:hidden;padding:6px 12px;border-radius:10px;font:26px/1.5 sans-serif;color:#222;background:#fbf8ef;' +
-      'border:1px solid #cfc7b0;box-shadow:0 4px 16px rgba(0,0,0,.18)}' +
-      '.p{opacity:.55}.t{font:18px/1.5 sans-serif;white-space:pre-wrap}' +
-      '@media (prefers-color-scheme:dark){.b{color:#eee;background:#2b2a27;border-color:#555}}</style><div class="b"></div>';
-    barBody = sr.querySelector('.b');
+      '.b{box-sizing:border-box;max-width:min(640px,calc(100vw - 16px));max-height:40vh;overflow:hidden;padding:4px 10px 4px 12px;border-radius:8px;' +
+      'font:24px/1.5 sans-serif;color:#222;background:#fbf8ef;border:1px solid #cfc7b0;box-shadow:0 4px 14px rgba(0,0,0,.16);display:flex;gap:10px;align-items:center}' +
+      '.c{overflow-wrap:anywhere}.c>span+span{margin-left:.6em;padding-left:.6em;border-left:1px solid #cfc7b0}.p{opacity:.55}' +
+      '.k{font:11px/1 sans-serif;opacity:.45;align-self:flex-end;padding-bottom:4px;white-space:nowrap}' +
+      '@media (prefers-color-scheme:dark){.b{color:#eee;background:#2b2a27;border-color:#555}.c>span+span{border-color:#555}}</style>' +
+      '<div class="b"><div class="c"></div><div class="k">Esc</div></div>';
+    barBody = sr.querySelector('.c');
     (document.body || document.documentElement).appendChild(bar);
   }
   function hideBar() { if (bar) bar.style.display = 'none'; }
   function updateBar() {
     const el = barTarget;
-    if (!active() || !el || !el.isConnected) { hideBar(); return; }
-    const items = previewItems(editableText(el));
-    if (!items.length) { hideBar(); return; }
+    if (!active() || previewMode === 'off' || !el || !el.isConnected || barDismissed === el) { hideBar(); return; }
+    let pieces;
+    if (previewMode === 'all') pieces = allPieces(el.value !== undefined ? el.value : (el.innerText || el.textContent || ''));
+    else { const ac = aroundCaret(el), p = ac && pieceAtCaret(ac[0], ac[1]); pieces = p ? [p] : []; }
+    pieces = pieces.filter(p => normalise(p.content));
+    if (!pieces.length) { hideBar(); return; }
     ensureBar();
-    barBody.innerHTML = items.map(it => it.plain ? '<span class="t">' + it.plain.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>'
-      : '<span' + (it.pending ? ' class="p"' : '') + '>' + K.renderInline(normalise(it.content)) + '</span>').join('');
-    barBody.scrollTop = barBody.scrollHeight;
-    const r = el.getBoundingClientRect();
-    bar.style.display = 'block';
-    bar.style.left = Math.max(4, Math.min(r.left, innerWidth - 260)) + 'px';
-    bar.style.width = Math.max(240, Math.min(r.width, innerWidth - 8)) + 'px';
-    const h = bar.offsetHeight;
-    if (r.top > h + 12) { bar.style.top = (r.top - h - 6) + 'px'; } else { bar.style.top = Math.min(r.bottom + 6, innerHeight - h - 4) + 'px'; }
+    barBody.innerHTML = pieces.map(p => '<span' + (p.pending ? ' class="p"' : '') + '>' + K.renderInline(normalise(p.content)) + '</span>').join('');
+    bar.style.display = 'block'; bar.style.left = '0px'; bar.style.top = '-9999px';
+    const c = caretRect(el), w = bar.offsetWidth, h = bar.offsetHeight;
+    bar.style.left = Math.max(8, Math.min(c.left - 14, innerWidth - w - 8)) + 'px';
+    // above the caret line if it fits, otherwise below it; never on top of the line being typed
+    bar.style.top = (c.top - h - 6 >= 4 ? c.top - h - 6 : Math.min(c.bottom + 6, innerHeight - h - 4)) + 'px';
   }
   function onEdit(e) {
     const el = editableOf(e.composedPath ? e.composedPath()[0] : e.target);
     if (!el) return;
+    if (barTarget !== el) barDismissed = null;
     barTarget = el; updateBar();
   }
+  function onKey(e) {
+    if (e.key === 'Escape' && bar && bar.style.display !== 'none' && barTarget) { barDismissed = barTarget; hideBar(); e.stopPropagation(); }
+  }
   function initPreview() {
-    ['focusin', 'input', 'keyup', 'compositionend'].forEach(t => document.addEventListener(t, onEdit, true));
-    document.addEventListener('focusout', () => setTimeout(() => { if (!editableOf(document.activeElement)) { barTarget = null; hideBar(); } }, 0), true);
+    ['focusin', 'input', 'keyup', 'mouseup', 'compositionend'].forEach(t => document.addEventListener(t, onEdit, true));
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('selectionchange', () => { if (barTarget && document.activeElement && barTarget.contains(document.activeElement)) updateBar(); });
+    document.addEventListener('focusout', () => setTimeout(() => {
+      if (!editableOf(document.activeElement)) { barTarget = null; barDismissed = null; hideBar(); }
+    }, 0), true);
     addEventListener('scroll', () => { if (barTarget) updateBar(); }, true);
     addEventListener('resize', () => { if (barTarget) updateBar(); });
   }
@@ -212,10 +270,11 @@
   function init() {
     startObserver(); initPreview();
     if (!ext) { scan(document.body); return; }
-    ext.storage.local.get({ enabled: true, disabledHosts: [] }, v => { enabled = v.enabled; disabledHosts = v.disabledHosts; applySettings(); });
+    ext.storage.local.get({ enabled: true, disabledHosts: [], previewMode: 'caret' }, v => { enabled = v.enabled; disabledHosts = v.disabledHosts; previewMode = v.previewMode; applySettings(); });
     ext.storage.onChanged.addListener(ch => {
       if (ch.enabled) enabled = ch.enabled.newValue;
       if (ch.disabledHosts) disabledHosts = ch.disabledHosts.newValue || [];
+      if (ch.previewMode) { previewMode = ch.previewMode.newValue || 'caret'; updateBar(); }
       applySettings();
     });
     ext.runtime.onMessage.addListener((msg, sender, reply) => {
