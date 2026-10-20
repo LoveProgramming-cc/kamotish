@@ -1,16 +1,18 @@
 #!/usr/bin/env node
-/* Web GUI for md2pdf:  node server.js [port]   then open http://127.0.0.1:4747
- * Only listens on 127.0.0.1.  Reads the Markdown you drop in the page (or a folder you name), writes PDFs only when
- * you give an output folder; otherwise the PDF is downloaded by the browser.
+/* Local version of the Kamotish tool:  node server.js [port]   then open http://127.0.0.1:4747
+ * Serves the same app as the online version (site/) and adds what a web page cannot do on its own: load a folder by
+ * path, save edits back to the file, print PDFs with page numbers through Chrome, write PDFs into a folder.
+ * Only listens on 127.0.0.1.  Writes only .md files that were loaded by path, and PDFs into the folder you name.
  */
 'use strict';
 const fs = require('fs'), http = require('http'), path = require('path');
 const L = require('./lib');
 
 const PORT = Number(process.argv[2]) || 4747, HOST = '127.0.0.1', ORIGIN = `http://${HOST}:${PORT}`;
-const GUI = path.join(__dirname, 'gui.html');
+const ROOT = path.join(__dirname, '..', '..'), SITE = path.join(ROOT, 'site'), WEB = path.join(ROOT, 'web');
+const WEB_FILES = ['kamotish.js', 'markdown-it-kamotish.js', 'kamotish-markdown.js', 'demo.html'];
 const allowedDirs = new Set();                      // folders loaded by path: their files (images) may be served
-const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.png': 'image/png',
+const TYPES = { '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.zip': 'application/zip', '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.pdf': 'application/pdf' };
 
 const jobs = new Map();                              // id -> html, loaded by Chrome via /job/<id> (faster than setContent)
@@ -40,17 +42,22 @@ const safeName = n => (String(n || 'document').replace(/\.md$/i, '').replace(/[\
 
 function htmlFor(b) {
   const base = b.dir && allowedDirs.has(b.dir) ? ORIGIN + '/fs' + encodeURI(b.dir) + '/' : '';
-  return L.toHtml(String(b.md || ''), { title: safeName(b.name), base, katexHref: ORIGIN + '/katex/katex.min.css',
+  return L.toHtml(String(b.md || ''), { title: safeName(b.name), base, katexHref: ORIGIN + '/vendor/katex/katex.min.css',
     paper: b.paper || 'A4', fontSize: b.fontSize || 11 });
 }
 
 async function handle(req, res) {
   const url = new URL(req.url, ORIGIN), p = decodeURIComponent(url.pathname);
-  if (req.method === 'GET' && p === '/') return serveFile(res, GUI);
-  if (req.method === 'GET' && p.startsWith('/katex/')) {
-    const f = path.join(L.KATEX_DIR, p.slice(7));
-    return inside(f, L.KATEX_DIR) ? serveFile(res, f) : send(res, 403, 'forbidden', 'text/plain');
+  if (req.method === 'GET' && p === '/api/info') return send(res, 200, { local: true, version: 1 });
+  if (req.method === 'GET' && (p === '/' || p === '/index.html')) return serveFile(res, path.join(SITE, 'index.html'));
+  if (req.method === 'GET' && WEB_FILES.includes(p.slice(1))) return serveFile(res, path.join(WEB, p.slice(1)));
+  if (req.method === 'GET' && /^\/kamotish-(chrome|firefox)\.zip$/.test(p)) return serveFile(res, path.join(ROOT, 'dist', p.slice(1)));
+  if (req.method === 'GET' && p.startsWith('/vendor/')) {
+    const rest = p.slice(8);
+    if (rest.startsWith('katex/')) { const f = path.join(L.KATEX_DIR, rest.slice(6)); return inside(f, L.KATEX_DIR) ? serveFile(res, f) : send(res, 403, 'forbidden', 'text/plain'); }
+    return L.VENDOR[rest] && rest !== 'katex' ? serveFile(res, L.VENDOR[rest]) : send(res, 404, 'not found', 'text/plain');
   }
+  if (req.method === 'GET' && /^\/[\w.-]+\.(js|css|png|svg|ico)$/.test(p) && fs.existsSync(path.join(SITE, p.slice(1)))) return serveFile(res, path.join(SITE, p.slice(1)));
   if (req.method === 'GET' && p.startsWith('/job/')) {
     const html = jobs.get(p.slice(5));
     return html ? send(res, 200, html, 'text/html; charset=utf-8') : send(res, 404, 'not found', 'text/plain');
@@ -75,10 +82,6 @@ async function handle(req, res) {
     fs.writeFileSync(path.join(dir, name), String(b.md || ''), 'utf8');
     return send(res, 200, { saved: path.join(dir, name) });
   }
-  if (req.method === 'POST' && p === '/api/render') {
-    const b = await readBody(req);
-    return send(res, 200, { html: htmlFor(b), problems: L.problems(String(b.md || '')) });
-  }
   if (req.method === 'POST' && p === '/api/pdf') {
     const b = await readBody(req);
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -102,5 +105,5 @@ async function handle(req, res) {
 }
 
 http.createServer((req, res) => handle(req, res).catch(e => { console.error(e); send(res, 500, { error: String(e.message || e) }); }))
-  .listen(PORT, HOST, () => console.log('卡谋语 Markdown → PDF:  ' + ORIGIN));
+  .listen(PORT, HOST, () => console.log('卡谋语工具 (本地版):  ' + ORIGIN));
 process.on('SIGINT', () => L.closeBrowser().finally(() => process.exit(0)));

@@ -6,7 +6,7 @@
 \kamotish{\mi\wou\3中国人\mou\2}      →  渲染成卡谋语文字
 ```
 
-**在线使用**：<https://loveprogramming-cc.github.io/kamotish/>，可以试写卡谋语，也可以把 Markdown 导出成 PDF，不用安装任何东西。
+**在线使用**：<https://loveprogramming-cc.github.io/kamotish/>，可以试写卡谋语，预览、修改 Markdown 并导出 PDF，不用安装任何东西。
 
 ## 包含什么
 
@@ -14,8 +14,7 @@
 |---|---|---|
 | **渲染库** | 一个 JS 文件，没有依赖；网页引入后用 `<kamo-text>` 或 `Kamotish.render()` 显示卡谋语 | [`web/kamotish.js`](web/kamotish.js) |
 | **浏览器插件** | 任何网页 (聊天、文档、论坛) 里的 `\kamotish{…}` 自动显示成卡谋语；输入框里实时预览 | [`extension/`](extension/)、安装包在 [`dist/`](dist/) |
-| **Markdown → PDF** | 含卡谋语和数学公式的 Markdown 批量导出 PDF；有网页界面，也有命令行 | [`tools/md2pdf/`](tools/md2pdf/) |
-| **在线版** | 试写和 Markdown 转 PDF (浏览器打印) | [`site/`](site/)，自动部署到 GitHub Pages |
+| **文档工具** | Markdown (含卡谋语和数学公式) 预览、定位并修改写错的卡谋语、导出 PDF。在线版打开即用；本地版另外支持按路径载入、批量导出、自动页码 | 页面 [`site/`](site/)，本地服务 [`tools/md2pdf/`](tools/md2pdf/) |
 | **markdown-it 插件** | 在自己的 markdown-it 项目里支持 `\kamotish{…}` | [`web/markdown-it-kamotish.js`](web/markdown-it-kamotish.js) |
 | **字形制作工具** | 从手写原稿到最终字形、再到渲染库的全部 Python 脚本 | [`tools/`](tools/) |
 
@@ -26,7 +25,7 @@
 
 ## 快速开始
 
-**本地 Markdown → PDF (网页界面)**：需要 [Node.js](https://nodejs.org/) 18 以上和 Google Chrome (或 Edge / Chromium)。
+**本地版文档工具**：需要 [Node.js](https://nodejs.org/) 18 以上和 Google Chrome (或 Edge / Chromium)。
 
 ```sh
 cd tools/md2pdf
@@ -39,12 +38,12 @@ npm start            # 打开 http://127.0.0.1:4747
 ## 目录结构
 
 ```
-web/            渲染库 kamotish.js、markdown-it 插件、演示页
+web/            渲染库 kamotish.js、markdown-it 插件、共用的 Markdown 设置、演示页
 extension/      浏览器插件源码
 dist/           浏览器插件安装包 (zip)
 tools/          Python 字形工具 (生成 kamotish.js)
-tools/md2pdf/   Markdown → PDF (网页界面 + 命令行)
-site/           在线版页面 (GitHub Pages)
+tools/md2pdf/   文档工具的本地服务 + 命令行
+site/           文档工具页面 (在线版和本地版共用)
 docs/           使用手册、书写说明
 resources/      原稿、中间产物、样张、备份 (见 resources/README.md)
 ```

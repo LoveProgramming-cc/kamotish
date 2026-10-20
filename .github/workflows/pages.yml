@@ -23,12 +23,20 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Assemble site
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install the libraries (same versions as the local version)
+        run: npm ci --prefix tools/md2pdf --ignore-scripts
+      - name: Assemble site (same files the local server serves)
         run: |
-          mkdir _site
+          M=tools/md2pdf/node_modules
+          mkdir -p _site/vendor
           cp site/* _site/
-          cp web/kamotish.js web/markdown-it-kamotish.js web/demo.html _site/
+          cp web/kamotish.js web/markdown-it-kamotish.js web/kamotish-markdown.js web/demo.html _site/
           cp dist/kamotish-chrome.zip dist/kamotish-firefox.zip _site/
+          cp $M/markdown-it/dist/markdown-it.min.js $M/markdown-it-texmath/texmath.js _site/vendor/
+          cp -r $M/katex/dist _site/vendor/katex
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

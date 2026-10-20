@@ -3,233 +3,204 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>卡谋语在线工具</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.css">
-<script src="https://cdn.jsdelivr.net/npm/markdown-it@14.3.3/dist/markdown-it.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/markdown-it-texmath@1.0.0/texmath.js"></script>
+<title>卡谋语工具</title>
+<!-- The same page is the online version (GitHub Pages) and the local version (tools/md2pdf/server.js). -->
+<script src="vendor/markdown-it.min.js"></script>
+<script src="vendor/katex/katex.min.js"></script>
+<script src="vendor/texmath.js"></script>
 <script src="kamotish.js"></script>
 <script src="markdown-it-kamotish.js"></script>
+<script src="kamotish-markdown.js"></script>
 <style>
-:root { --bg: #f6f4ee; --card: #fff; --fg: #1d1d1b; --muted: #75716a; --line: #dedad0; --accent: #1e3a48; --accent-fg: #fff; --warn: #b3261e; --warn-bg: #fdeeec; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #171715; --card: #20201d; --fg: #e9e6de; --muted: #9b978d; --line: #393934; --accent: #8fb7c9; --accent-fg: #10181c; --warn: #f08b82; --warn-bg: #3a1f1c; } }
-:root[data-theme="dark"] { --bg: #171715; --card: #20201d; --fg: #e9e6de; --muted: #9b978d; --line: #393934; --accent: #8fb7c9; --accent-fg: #10181c; --warn: #f08b82; --warn-bg: #3a1f1c; }
+:root { --bg: #f6f4ee; --panel: #fff; --fg: #1d1d1b; --muted: #75716a; --line: #dedad0; --accent: #1e3a48; --accent-fg: #fff;
+        --warn: #b3261e; --warn-bg: #fdeeec; --warn-line: #f2c9c4; --ok: #2e7d32; --ok-bg: #e6f2e7; --hover: rgba(128,128,128,.12); --sel: #e2ebef; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #171715; --panel: #20201d; --fg: #e9e6de; --muted: #9b978d; --line: #393934; --accent: #8fb7c9; --accent-fg: #10181c;
+  --warn: #f08b82; --warn-bg: #3a1f1c; --warn-line: #5a2c27; --ok: #8fd19a; --ok-bg: #1f3322; --sel: #2a3a42; } }
+:root[data-theme="dark"] { --bg: #171715; --panel: #20201d; --fg: #e9e6de; --muted: #9b978d; --line: #393934; --accent: #8fb7c9; --accent-fg: #10181c;
+  --warn: #f08b82; --warn-bg: #3a1f1c; --warn-line: #5a2c27; --ok: #8fd19a; --ok-bg: #1f3322; --sel: #2a3a42; }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
-header { max-width: 1100px; margin: 0 auto; padding: 22px 16px 0; }
-header h1 { margin: 0; font-size: 22px; }
-header p { margin: 4px 0 14px; color: var(--muted); }
-nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-nav button { font: inherit; border: 0; background: none; color: var(--muted); padding: 8px 14px; cursor: pointer; border-bottom: 2px solid transparent; }
+html, body { height: 100%; margin: 0; }
+body { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--fg);
+       font: 14px/1.55 -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 10px 8px 10px 0; }
+.mode { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--hover); color: var(--muted); }
+.mode.local { background: var(--ok-bg); color: var(--ok); }
+nav { display: flex; gap: 2px; margin-left: auto; }
+nav button { font: inherit; border: 0; background: none; color: var(--muted); padding: 12px 12px 10px; cursor: pointer; border-bottom: 2px solid transparent; }
 nav button.on { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
-main { max-width: 1100px; margin: 0 auto; padding: 16px; }
-section[hidden] { display: none; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
-textarea { width: 100%; min-height: 150px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit;
-           font: 14px/1.5 ui-monospace, Menlo, Consolas, monospace; resize: vertical; }
-.out { font-size: 30px; line-height: 2; overflow-wrap: anywhere; }
+main { flex: 1; min-height: 0; display: flex; }
+main > section { flex: 1; min-width: 0; min-height: 0; }
+main > section[hidden] { display: none; }
+.scroll { overflow: auto; padding: 16px; }
+.wrap { max-width: 980px; margin: 0 auto; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+button.b { font: inherit; padding: 4px 11px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; white-space: nowrap; }
+button.b:hover:not(:disabled) { border-color: var(--accent); }
+button.b.primary, button.b.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+button.b:disabled { opacity: .45; cursor: default; }
+input.t, select { font: inherit; padding: 3px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); min-width: 0; }
+code { font-family: Menlo, ui-monospace, monospace; font-size: .92em; background: var(--hover); padding: 0 4px; border-radius: 4px; }
 .small { font-size: 13px; color: var(--muted); }
-button.b { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
-button.b.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-button.b:disabled { opacity: .5; cursor: default; }
-code { background: rgba(128,128,128,.15); padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, Menlo, monospace; font-size: .92em; }
+a { color: var(--accent); }
+body:not(.local) [data-local-only] { display: none !important; }
+body.local [data-online-only] { display: none !important; }
+
+/* try it */
+#src { width: 100%; min-height: 140px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit;
+       font: 14px/1.5 Menlo, ui-monospace, monospace; resize: vertical; }
+#out { font-size: 30px; line-height: 2; overflow-wrap: anywhere; }
 .kamo-err { color: var(--warn); }
-/* MD -> PDF */
-.tool { display: grid; grid-template-columns: 280px 1fr; gap: 14px; }
-#drop { border: 2px dashed var(--line); border-radius: 10px; padding: 14px; text-align: center; color: var(--muted); }
-#drop.over { border-color: var(--accent); }
-.opts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; font-size: 13px; }
-.opts select { font: inherit; padding: 2px 4px; border-radius: 5px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
-#list { list-style: none; padding: 0; margin: 10px 0 0; }
-#list li { padding: 6px 8px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; display: flex; gap: 6px; align-items: center; }
-#list li.sel { background: rgba(128,128,128,.16); }
-#list .n { flex: 1; }
-.badge { font-size: 12px; padding: 0 6px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); white-space: nowrap; }
-#problems { display: none; background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 13px; max-height: 140px; overflow: auto; }
-#paper { background: #fff; color: #111; border: 1px solid var(--line); border-radius: 6px; padding: 28px 34px; min-height: 300px; }
-#paper.empty { color: #888; display: flex; align-items: center; justify-content: center; text-align: center; }
-.downloads a { color: var(--accent); }
-@media (max-width: 760px) { .tool { grid-template-columns: 1fr; } #paper { padding: 16px; } }
 
-/* the document itself (screen preview and print) */
-.doc { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; line-height: 1.75; }
-.doc h1, .doc h2, .doc h3, .doc h4 { line-height: 1.35; break-after: avoid; }
-.doc h2 { border-bottom: 1px solid #ccc; padding-bottom: .2em; }
-.doc table { border-collapse: collapse; margin: .8em 0; }
-.doc tr { break-inside: avoid; }
-.doc th, .doc td { border: 1px solid #bbb; padding: .3em .6em; vertical-align: top; }
-.doc th { background: #f3f3f3; }
-.doc code { background: #f4f4f4; color: #111; }
-.doc pre { background: #f4f4f4; padding: .7em; white-space: pre-wrap; }
-.doc pre code { background: none; padding: 0; }
-.doc blockquote { margin: .8em 0; padding: .1em 1em; border-left: 3px solid #ccc; color: #444; }
-.doc hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
-.doc img { max-width: 100%; }
-.doc .kamo-err { color: #c00; background: #fee; }
-.doc eqn, .doc .math-block { display: block; overflow-x: auto; margin: .8em 0; break-inside: avoid; }
-
-@media print {
-  body { background: #fff; }
-  header, nav, .noprint, #problems { display: none !important; }
-  main { max-width: none; padding: 0; }
-  section { display: none !important; }
-  section#tab-pdf { display: block !important; }
-  .tool { display: block; }
-  #paper { border: 0; padding: 0; border-radius: 0; }
+/* documents */
+#tab-doc { display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+#tab-doc[hidden] { display: none; }
+aside { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+#drop { margin: 12px; padding: 14px; border: 2px dashed var(--line); border-radius: 10px; text-align: center; color: var(--muted); }
+#drop.over { border-color: var(--accent); background: var(--sel); }
+.row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+#drop .row { justify-content: center; margin-top: 8px; }
+.side { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.side label { display: flex; align-items: center; gap: 6px; }
+.side .grow { flex: 1; }
+#bar { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); }
+#list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+#list li { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+#list li:hover { background: var(--hover); }
+#list li.sel { background: var(--sel); }
+#list .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-size: 12px; padding: 0 6px; border-radius: 9px; white-space: nowrap; }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.ok { background: var(--ok-bg); color: var(--ok); }
+.badge.busy { background: var(--hover); color: var(--muted); }
+.dirty { color: #d97706; }
+.docmain { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#docbar { display: none; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+#docbar .title { flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+#cursorPos { color: var(--muted); font-size: 12px; white-space: nowrap; }
+#problems { display: none; padding: 6px 12px; background: var(--warn-bg); border-bottom: 1px solid var(--warn-line); color: var(--warn); max-height: 150px; overflow: auto; font-size: 13px; }
+#problems .p { display: flex; gap: 10px; align-items: baseline; padding: 2px 6px; border-radius: 5px; cursor: pointer; }
+#problems .p:hover { background: var(--hover); }
+#problems .ln { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#problems code { word-break: break-all; }
+#empty { margin: auto; padding: 24px; color: var(--muted); text-align: center; }
+#work { flex: 1; display: flex; min-height: 0; }
+#work[hidden] { display: none; }
+#edwrap { display: none; flex: 1; min-width: 0; border-right: 1px solid var(--line); background: var(--panel); position: relative; }
+#work.editing #edwrap { display: flex; }
+#editor, #mirror { flex: 1; border: 0; outline: none; resize: none; padding: 10px 14px; font: 13px/1.7 Menlo, "PingFang SC", monospace; color: var(--fg);
+                   background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; tab-size: 4; }
+#mirror { position: absolute; visibility: hidden; left: 0; top: 0; right: 0; height: auto; overflow: hidden; }
+#preview { flex: 1; min-width: 0; border: 0; background: #fff; }
+#log { padding: 5px 12px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); background: var(--panel); min-height: 26px;
+       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 800px) {
+  #tab-doc { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  aside { max-height: 38vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  #work.editing { flex-direction: column; } #work.editing #edwrap { border-right: 0; border-bottom: 1px solid var(--line); }
+  nav { margin-left: 0; }
 }
 </style>
-<style id="pagecss">@page { size: A4; margin: 18mm 16mm 20mm; }</style>
 </head>
-<body>
+<body data-kamotish="off">
 <header>
-  <h1>卡谋语在线工具</h1>
-  <p>在线写卡谋语，或把含 <code>\kamotish{…}</code> 和数学公式的 Markdown 导出成 PDF。所有处理都在你的浏览器里完成，文件不会上传。</p>
+  <h1>卡谋语工具</h1>
+  <span class="mode" id="mode">在线版</span>
   <nav>
-    <button data-tab="try" class="on">试写</button>
-    <button data-tab="pdf">Markdown → PDF</button>
+    <button data-tab="doc">文档 → PDF</button>
+    <button data-tab="try">试写</button>
     <button data-tab="dl">下载与说明</button>
   </nav>
 </header>
 <main>
-  <section id="tab-try">
-    <div class="card">
-      <textarea id="src" spellcheck="false">我叫 ma-tas-jian，他叫 su-kun-liang。
+  <section id="tab-doc">
+    <aside>
+      <div id="drop">把 .md 文件或文件夹拖到这里
+        <div class="row">
+          <button class="b" id="pickFiles">选择文件</button>
+          <button class="b" id="pickDir">选择文件夹</button>
+        </div>
+        <input type="file" id="files" accept=".md,.markdown,text/markdown" multiple hidden>
+        <input type="file" id="dirInput" webkitdirectory hidden>
+      </div>
+      <div class="side">
+        <div class="row" data-local-only><input class="t grow" id="dirPath" placeholder="本机文件夹路径 (可直接保存、显示图片)"><button class="b" id="loadPath">载入</button></div>
+        <div class="row">
+          <label>纸张 <select id="paper"><option>A4</option><option>A5</option><option>B5</option><option value="Letter">Letter</option></select></label>
+          <label>字号 <select id="size"><option>10</option><option selected>11</option><option>12</option><option>14</option></select></label>
+          <label data-local-only><input type="checkbox" id="pagenum" checked> 页码</label>
+        </div>
+        <label data-local-only>PDF 存到 <input class="t grow" id="saveTo" placeholder="留空 = 浏览器下载"></label>
+      </div>
+      <div id="bar"><span id="count">0 个文件</span>
+        <span class="row"><button class="b" id="clear">清空</button><button class="b primary" id="all" data-local-only disabled>全部导出</button></span></div>
+      <ul id="list"></ul>
+    </aside>
+    <div class="docmain">
+      <div id="docbar">
+        <span class="title" id="docTitle"></span>
+        <span id="cursorPos"></span>
+        <button class="b" id="editBtn" title="打开源码编辑 (左源码、右预览)">编辑</button>
+        <button class="b" id="saveBtn" disabled>保存</button>
+        <button class="b primary" id="pdfBtn">导出 PDF</button>
+      </div>
+      <div id="problems"></div>
+      <div id="empty">
+        <p>左边加入 Markdown 文件，这里显示预览。</p>
+        <p class="small">卡谋语写 <code>\kamotish{…}</code>；数学公式写 <code>$…$</code>、<code>$$…$$</code> 或 <code>```latex</code> 代码块。<br>
+        <span data-online-only>文件只在你的浏览器里处理，不会上传。</span></p>
+      </div>
+      <div id="work" hidden>
+        <div id="edwrap"><textarea id="editor" spellcheck="false"></textarea><div id="mirror" aria-hidden="true"></div></div>
+        <iframe id="preview" title="预览"></iframe>
+      </div>
+      <div id="log"></div>
+    </div>
+  </section>
+
+  <section id="tab-try" class="scroll" hidden>
+    <div class="wrap">
+      <div class="card">
+        <textarea id="src" spellcheck="false">我叫 ma-tas-jian，他叫 su-kun-liang。
 \mi\wou\3中国人\mou\2
 \lou\3学\xi\2,\kou\hou2\mou\2。</textarea>
-      <p class="small">拼读直接写小写字母，音节之间用 <code>-</code>；字素写 <code>\名字</code>；音调写 <code>\2</code> <code>\3</code> <code>\4</code>；汉字和标点原样保留。完整写法见<a href="#" data-goto="dl">使用手册</a>。</p>
-    </div>
-    <div class="card out" id="out"></div>
-  </section>
-
-  <section id="tab-pdf" hidden>
-    <div class="tool">
-      <div class="noprint">
-        <div id="drop">把 .md 文件拖到这里<br><button class="b" id="pick" style="margin-top:8px">选择文件</button>
-          <input type="file" id="files" accept=".md,.markdown,text/markdown" multiple hidden></div>
-        <div class="opts">
-          <label>纸张 <select id="paperSize"><option>A4</option><option>A5</option><option>B5</option><option>letter</option></select></label>
-          <label>字号 <select id="fontSize"><option>10</option><option selected>11</option><option>12</option><option>14</option></select> pt</label>
-        </div>
-        <ul id="list"></ul>
-        <p><button class="b primary" id="print" disabled>打印 / 存为 PDF</button></p>
-        <p class="small">在打印窗口里选"存为 PDF"。想要页码：在打印设置里勾选"页眉和页脚"。<br>
-          文件里用相对路径引用的图片在网页版中无法显示；需要图片请用本地版 (见"下载与说明")。</p>
+        <p class="small">拼读直接写小写字母，音节之间用 <code>-</code>；字素写 <code>\名字</code>；音调写 <code>\2</code> <code>\3</code> <code>\4</code>；汉字和标点原样保留。完整写法见使用手册。</p>
       </div>
-      <div>
-        <div id="problems"></div>
-        <div id="paper" class="doc empty">左边加入 Markdown 文件后，这里显示预览。</div>
-      </div>
+      <div class="card" id="out"></div>
     </div>
   </section>
 
-  <section id="tab-dl" hidden>
-    <div class="card downloads">
-      <h3 style="margin-top:0">下载</h3>
-      <ul>
-        <li><a href="kamotish-chrome.zip">kamotish-chrome.zip</a>：浏览器插件 (Chrome / Edge)，网页里的 <code>\kamotish{…}</code> 自动渲染</li>
-        <li><a href="kamotish-firefox.zip">kamotish-firefox.zip</a>：同上，Firefox 版</li>
-        <li><a href="kamotish.js">kamotish.js</a>：渲染库，可以放进自己的网页</li>
-        <li><a href="markdown-it-kamotish.js">markdown-it-kamotish.js</a>：markdown-it 插件</li>
-      </ul>
-      <h3>说明</h3>
-      <ul>
-        <li><a id="repo" href="#">源代码 (GitHub)</a>：MIT 协议</li>
-        <li><a id="manual" href="#">使用手册</a>：输入方法、插件安装、Markdown 转 PDF (网页版、本地版、命令行)</li>
-        <li><a id="spec" href="#">卡谋语书写说明</a>：完整的输入格式 (也适合发给 AI 阅读)</li>
-      </ul>
+  <section id="tab-dl" class="scroll" hidden>
+    <div class="wrap">
+      <div class="card">
+        <h3 style="margin-top:0">两个版本</h3>
+        <p>本工具有<b>在线版</b>和<b>本地版</b>，是同一个页面：</p>
+        <ul>
+          <li><b>在线版</b>：打开网页即可用。导出 PDF 用浏览器的打印功能 (选“存为 PDF”，页码在打印设置里勾选“页眉和页脚”)。
+            在 Chrome / Edge 里，修改过的文件可以直接保存回原文件；其他浏览器会下载修改后的文件。</li>
+          <li><b>本地版</b>：在电脑上运行 <code>tools/md2pdf</code>，额外支持：按路径载入整个文件夹、显示文档里的相对路径图片、
+            一键批量导出 PDF (自动页码)、PDF 直接存进指定文件夹、不联网也能用。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">下载</h3>
+        <ul>
+          <li><a href="kamotish-chrome.zip">kamotish-chrome.zip</a>：浏览器插件 (Chrome / Edge)，网页里的 <code>\kamotish{…}</code> 自动渲染</li>
+          <li><a href="kamotish-firefox.zip">kamotish-firefox.zip</a>：同上，Firefox 版</li>
+          <li><a href="kamotish.js">kamotish.js</a>：渲染库，可以放进自己的网页</li>
+          <li><a href="markdown-it-kamotish.js">markdown-it-kamotish.js</a>：markdown-it 插件</li>
+        </ul>
+        <h3>说明</h3>
+        <ul>
+          <li><a id="repo" href="https://github.com/LoveProgramming-cc/kamotish">源代码 (GitHub)</a>：MIT 协议，含本地版</li>
+          <li><a id="manual" href="https://github.com/LoveProgramming-cc/kamotish/blob/main/docs/%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8C.md">使用手册</a>：输入方法、插件安装、文档导出</li>
+          <li><a id="spec" href="https://github.com/LoveProgramming-cc/kamotish/blob/main/docs/%E5%8D%A1%E8%B0%8B%E8%AF%AD%E4%B9%A6%E5%86%99%E8%AF%B4%E6%98%8E.md">卡谋语书写说明</a>：完整的输入格式 (也适合发给 AI 阅读)</li>
+        </ul>
+      </div>
     </div>
   </section>
 </main>
-<script>
-'use strict';
-const $ = id => document.getElementById(id);
-// links to the repository: derived from the Pages address (user.github.io/repo)
-(function () {
-  const m = location.hostname.match(/^([^.]+)\.github\.io$/), repoName = location.pathname.split('/').filter(Boolean)[0];
-  const repo = m && repoName ? `https://github.com/${m[1]}/${repoName}` : 'https://github.com/';
-  $('repo').href = repo;
-  $('manual').href = repo + '/blob/main/docs/%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8C.md';
-  $('spec').href = repo + '/blob/main/docs/%E5%8D%A1%E8%B0%8B%E8%AF%AD%E4%B9%A6%E5%86%99%E8%AF%B4%E6%98%8E.md';
-})();
-
-// ---- tabs
-function tab(name) {
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
-  document.querySelectorAll('main > section').forEach(s => { s.hidden = s.id !== 'tab-' + name; });
-  try { localStorage.setItem('kamo.tab', name); } catch (e) {}
-}
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => tab(b.dataset.tab));
-document.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.dataset.goto); });
-try { const t = localStorage.getItem('kamo.tab'); if (t && $('tab-' + t)) tab(t); } catch (e) {}
-
-// ---- try it
-const css = document.createElement('style'); css.textContent = Kamotish.css; document.head.appendChild(css);
-const live = () => { $('out').innerHTML = Kamotish.renderInline($('src').value); };
-$('src').addEventListener('input', live); live();
-
-// ---- Markdown -> PDF
-const md = window.markdownit({ html: true, linkify: true })
-  .use(window.texmath, { engine: window.katex, delimiters: ['dollars', 'brackets'], katexOptions: { throwOnError: false } })
-  .use(window.markdownitKamotish, window.Kamotish);
-// ```latex / ```tex / ```math / ```katex code blocks are display formulas, not code
-const MATH_FENCES = ['latex', 'tex', 'math', 'katex'], fence = md.renderer.rules.fence;
-md.renderer.rules.fence = (tokens, i, options, env, self) => {
-  const t = tokens[i];
-  if (!MATH_FENCES.includes(t.info.trim().split(/\s+/)[0].toLowerCase())) return fence(tokens, i, options, env, self);
-  return '<div class="math-block">' + katex.renderToString(t.content, { displayMode: true, throwOnError: false }) + '</div>\n';
-};
-const docs = []; let current = null;
-const CN = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
-const sortKey = n => n.replace(/[一二三四五六七八九十]+/g, m => String(m.length === 1 ? CN[m] : m === '十' ? 10 : (m[0] === '十' ? 10 + CN[m[1]] : CN[m[0]] * 10 + (CN[m[2]] || 0))).padStart(3, '0'));
-
-function problems(text) {
-  const out = [];
-  const walk = toks => toks.forEach(t => {
-    if (t.type === 'kamotish' && Kamotish.renderInline(t.content).includes('kamo-err')) out.push(t.content);
-    if (t.children) walk(t.children);
-  });
-  walk(md.parse(text, {}));
-  return out;
-}
-function add(list) {
-  list.forEach(d => { const i = docs.findIndex(x => x.name === d.name); d.problems = problems(d.md); if (i >= 0) docs[i] = d; else docs.push(d); });
-  docs.sort((a, b) => sortKey(a.name).localeCompare(sortKey(b.name), 'zh', { numeric: true }));
-  if (!current && docs.length) current = docs[0];
-  draw(); show();
-}
-function draw() {
-  const ul = $('list'); ul.innerHTML = '';
-  docs.forEach(d => {
-    const li = document.createElement('li'); if (d === current) li.className = 'sel';
-    const n = document.createElement('span'); n.className = 'n'; n.textContent = d.name; li.append(n);
-    if (d.problems.length) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = d.problems.length + ' 处无法渲染'; li.append(b); }
-    li.onclick = () => { current = d; draw(); show(); };
-    ul.append(li);
-  });
-  $('print').disabled = !current;
-}
-function show() {
-  if (!current) return;
-  const p = $('paper'); p.classList.remove('empty');
-  p.style.fontSize = $('fontSize').value + 'pt';
-  p.innerHTML = md.render(current.md);
-  document.title = current.name.replace(/\.(md|markdown)$/i, '');      // the default PDF file name
-  const pr = $('problems'), esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  if (current.problems.length) {
-    pr.style.display = 'block';
-    pr.innerHTML = '<b>' + current.problems.length + ' 处卡谋语无法渲染 (预览中显示为红色):</b><br>' + current.problems.map(t => '<code>\\kamotish{' + esc(t) + '}</code>').join('<br>');
-  } else pr.style.display = 'none';
-}
-const readFiles = fs => Promise.all([...fs].filter(f => /\.(md|markdown)$/i.test(f.name)).map(f => f.text().then(t => ({ name: f.name, md: t }))));
-$('pick').onclick = () => $('files').click();
-$('files').onchange = async e => { add(await readFiles(e.target.files)); e.target.value = ''; };
-const drop = $('drop');
-drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
-drop.ondragleave = () => drop.classList.remove('over');
-drop.ondrop = async e => { e.preventDefault(); drop.classList.remove('over'); add(await readFiles(e.dataTransfer.files)); };
-$('paperSize').onchange = () => { $('pagecss').textContent = '@page { size: ' + $('paperSize').value + '; margin: 18mm 16mm 20mm; }'; };
-$('fontSize').onchange = show;
-$('print').onclick = () => window.print();
-</script>
+<script src="app.js"></script>
 </body>
 </html>
