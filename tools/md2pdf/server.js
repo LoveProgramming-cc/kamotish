@@ -68,6 +68,13 @@ async function handle(req, res) {
       .map(f => ({ name: f, dir, md: fs.readFileSync(path.join(dir, f), 'utf8') }));
     return send(res, 200, { dir, files });
   }
+  if (req.method === 'POST' && p === '/api/save') {               // write an edited file back (only .md files in a loaded folder)
+    const b = await readBody(req), dir = String(b.dir || ''), name = String(b.name || '');
+    if (!allowedDirs.has(dir) || path.basename(name) !== name || !/\.(md|markdown)$/i.test(name) || !fs.existsSync(path.join(dir, name)))
+      return send(res, 400, { error: '只能保存从路径载入的 .md 文件' });
+    fs.writeFileSync(path.join(dir, name), String(b.md || ''), 'utf8');
+    return send(res, 200, { saved: path.join(dir, name) });
+  }
   if (req.method === 'POST' && p === '/api/render') {
     const b = await readBody(req);
     return send(res, 200, { html: htmlFor(b), problems: L.problems(String(b.md || '')) });

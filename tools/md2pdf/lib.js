@@ -45,20 +45,35 @@ blockquote { margin: .8em 0; padding: .1em 1em; border-left: 3px solid #ccc; col
 hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
 img { max-width: 100%; }
 .kamo-err { color: #c00; background: #fee; }
+.kamo-flash { outline: 3px solid #f59e0b; outline-offset: 2px; border-radius: 3px; transition: outline-color 1.5s; }
 eq { display: inline; } eqn, .math-block { display: block; overflow-x: auto; margin: .8em 0; break-inside: avoid; }
 </style></head><body>
 ${md.render(mdText)}
 </body></html>`;
 }
 
-// the \kamotish{…} pieces that contain something the renderer cannot read (shown in red)
+// the \kamotish{…} pieces that contain something the renderer cannot read (shown in red):
+// [{ index (n-th \kamotish in the document), line (1-based), column (0-based), source (as written), content }]
 function problems(mdText) {
-  const out = [], env = {};
-  const walk = toks => toks.forEach(t => {
-    if (t.type === 'kamotish' && Kamotish.renderInline(t.content).includes('kamo-err')) out.push(t.content);
-    if (t.children) walk(t.children);
+  const out = [], lines = mdText.split('\n'); let index = 0;
+  const walk = (toks, parent) => toks.forEach(t => {
+    if (t.type === 'kamotish') {
+      if (Kamotish.renderInline(t.content).includes('kamo-err')) {
+        const src = parent.content, before = src.slice(0, t.meta.start), source = src.slice(t.meta.start, t.meta.end);
+        let line = (parent.map ? parent.map[0] : 0) + (before.match(/\n/g) || []).length;
+        let column = lines[line] !== undefined ? lines[line].indexOf(source) : -1;
+        if (column < 0) {                                       // map missing or line shifted: search the whole text
+          const at = mdText.indexOf(source);
+          if (at >= 0) { line = (mdText.slice(0, at).match(/\n/g) || []).length; column = at - mdText.lastIndexOf('\n', at - 1) - 1; }
+          else column = 0;
+        }
+        out.push({ index, line: line + 1, column, source, content: t.content });
+      }
+      index++;
+    }
+    if (t.children) walk(t.children, t);
   });
-  walk(md.parse(mdText, env));
+  walk(md.parse(mdText, {}), null);
   return out;
 }
 

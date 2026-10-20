@@ -26,7 +26,7 @@ async function main() {
       const output = path.resolve(out || path.join(outDir || path.dirname(input), name + '.pdf'));
       const text = fs.readFileSync(input, 'utf8');
       const bad = L.problems(text);
-      if (bad.length) console.warn(`${name}: ${bad.length} Kamotish piece(s) could not be read:\n  ` + bad.slice(0, 10).join('\n  '));
+      if (bad.length) console.warn(`${name}: ${bad.length} Kamotish piece(s) could not be read:\n  ` + bad.slice(0, 10).map(p => '第 ' + p.line + ' 行: ' + p.source).join('\n  '));
       const html = L.toHtml(text, Object.assign({ title: name, base: 'file://' + encodeURI(path.dirname(input)) + '/' }, o));
       const htmlPath = keepHtml ? output.replace(/\.pdf$/i, '') + '.html' : path.join(os.tmpdir(), 'md2pdf-' + process.pid + '.html');
       fs.writeFileSync(htmlPath, html);

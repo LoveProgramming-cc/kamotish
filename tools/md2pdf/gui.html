@@ -7,9 +7,9 @@
 <style>
 :root { --bg: #f5f4f0; --panel: #fff; --line: #ddd9cf; --text: #1d1d1b; --muted: #77736a; --accent: #1e3a48; --warn: #b3261e; --ok: #2e7d32; }
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
 body { font: 14px/1.5 -apple-system, "PingFang SC", sans-serif; color: var(--text); background: var(--bg); display: grid;
-       grid-template-rows: auto 1fr; grid-template-columns: 340px 1fr; }
+       grid-template-rows: auto minmax(0, 1fr); grid-template-columns: 340px minmax(0, 1fr); }
 header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 16px;
          background: var(--accent); color: #fff; }
 header h1 { font-size: 16px; margin: 0 12px 0 0; font-weight: 600; }
@@ -37,16 +37,30 @@ button:disabled { opacity: .5; cursor: default; }
 .badge.warn { background: #fde7e5; color: var(--warn); }
 .badge.ok { background: #e6f2e7; color: var(--ok); }
 .badge.busy { background: #eee; color: var(--muted); }
-main { display: flex; flex-direction: column; min-height: 0; }
-#problems { display: none; padding: 8px 16px; background: #fdf1ef; border-bottom: 1px solid #f2c9c4; color: var(--warn); max-height: 160px; overflow: auto; font-size: 13px; }
+main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+#docbar { display: none; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+#docbar .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+#docbar button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dirty { color: #d97706; }
+#problems { display: none; padding: 6px 12px; background: #fdf1ef; border-bottom: 1px solid #f2c9c4; color: var(--warn); max-height: 150px; overflow: auto; font-size: 13px; }
+#problems .p { display: flex; gap: 10px; align-items: baseline; padding: 2px 6px; border-radius: 5px; cursor: pointer; }
+#problems .p:hover { background: #fbe0dc; }
+#problems .ln { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 #problems code { font-family: Menlo, monospace; background: #fff; padding: 0 4px; border-radius: 3px; word-break: break-all; }
-#preview { flex: 1; border: 0; width: 100%; background: #fff; }
+#work { flex: 1; display: flex; min-height: 0; }
+#edwrap { display: none; flex: 1; min-width: 0; border-right: 1px solid var(--line); background: #fff; position: relative; }
+#work.editing #edwrap { display: flex; }
+#editor, #mirror { flex: 1; border: 0; outline: none; resize: none; padding: 10px 14px; font: 13px/1.7 Menlo, "PingFang SC", monospace; color: var(--text);
+          background: #fff; white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; tab-size: 4; }
+#mirror { position: absolute; visibility: hidden; left: 0; top: 0; right: 0; height: auto; overflow: hidden; }
+#cursorPos { color: var(--muted); font-size: 12px; white-space: nowrap; }
+#preview { flex: 1; min-width: 0; border: 0; width: 100%; background: #fff; }
 #empty { margin: auto; color: var(--muted); text-align: center; }
 #log { padding: 6px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); background: var(--panel); min-height: 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 760px) { body { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; } aside { max-height: 45vh; } header input[type=text] { width: 100%; } }
 </style>
 </head>
-<body>
+<body data-kamotish="off">
 <header>
   <h1>卡谋语 Markdown → PDF</h1>
   <label>纸张 <select id="paper"><option>A4</option><option>A5</option><option>B5</option><option>Letter</option></select></label>
@@ -68,15 +82,25 @@ main { display: flex; flex-direction: column; min-height: 0; }
   <ul id="list"></ul>
 </aside>
 <main>
+  <div id="docbar">
+    <span class="title" id="docTitle"></span>
+    <span id="cursorPos"></span>
+    <button id="editBtn" title="打开源码编辑 (左源码、右预览)">编辑</button>
+    <button id="saveBtn" disabled>保存</button>
+  </div>
   <div id="problems"></div>
   <div id="empty">左边加入 Markdown 文件，这里显示预览。<br>数学公式写 <code>$…$</code> / <code>$$…$$</code>，卡谋语写 <code>\kamotish{…}</code>。</div>
-  <iframe id="preview" hidden title="预览"></iframe>
+  <div id="work" hidden>
+    <div id="edwrap"><textarea id="editor" spellcheck="false"></textarea><div id="mirror" aria-hidden="true"></div></div>
+    <iframe id="preview" title="预览"></iframe>
+  </div>
   <div id="log"></div>
 </main>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const docs = [];          // {name, md, dir?, problems?, status?}
+const docs = [];          // {name, md, saved (text on disk), dir?, problems?, status?}
+const isDirty = d => d.saved !== undefined && d.md !== d.saved;
 let current = null;
 const CN = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
 const sortKey = n => n.replace(/[一二三四五六七八九十]+/g, m => String(m.length === 1 ? CN[m] : m === '十' ? 10 : (m[0] === '十' ? 10 + CN[m[1]] : CN[m[0]] * 10 + (CN[m[2]] || 0))).padStart(3, '0'));
@@ -85,7 +109,7 @@ const byName = (a, b) => sortKey(a).localeCompare(sortKey(b), 'zh', { numeric: t
 const opts = () => ({ paper: $('paper').value, fontSize: Number($('size').value), pageNumbers: $('pagenum').checked, saveTo: $('saveTo').value.trim() });
 const log = t => { $('log').textContent = t; };
 try { $('saveTo').value = localStorage.getItem('kamo.saveTo') || ''; $('paper').value = localStorage.getItem('kamo.paper') || 'A4'; $('size').value = localStorage.getItem('kamo.size') || '11'; } catch (e) {}
-['saveTo', 'paper', 'size'].forEach(k => $(k).addEventListener('change', () => { try { localStorage.setItem('kamo.' + k, $(k).value); } catch (e) {} if (current && k !== 'saveTo') show(current); }));
+['saveTo', 'paper', 'size'].forEach(k => $(k).addEventListener('change', () => { try { localStorage.setItem('kamo.' + k, $(k).value); } catch (e) {} if (current && k !== 'saveTo') render(true); }));
 
 async function api(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -95,12 +119,15 @@ async function api(path, body) {
 
 function add(list) {
   for (const d of list) {
+    d.saved = d.md;
     const old = docs.findIndex(x => x.name === d.name && x.dir === d.dir);
+    if (old >= 0 && isDirty(docs[old]) && !confirm(d.name + ' 有未保存的修改，重新载入会丢掉这些修改。继续吗？')) continue;
+    if (old >= 0 && docs[old] === current) current = d;
     if (old >= 0) docs[old] = d; else docs.push(d);
     check(d);
   }
   draw();
-  if (!current && docs.length) show(docs[0]);
+  if (docs.length) show(current || docs[0]);
 }
 async function check(d) {
   try { const r = await (await api('/api/render', Object.assign({}, d, opts()))).json(); d.problems = r.problems; } catch (e) { d.problems = null; }
@@ -113,7 +140,7 @@ function draw() {
   const ul = $('list'); ul.innerHTML = '';
   docs.forEach(d => {
     const li = document.createElement('li'); if (d === current) li.className = 'sel';
-    const name = document.createElement('span'); name.className = 'name'; name.textContent = d.name; name.title = (d.dir ? d.dir + '/' : '') + d.name;
+    const name = document.createElement('span'); name.className = 'name'; name.textContent = (isDirty(d) ? '● ' : '') + d.name; name.title = (d.dir ? d.dir + '/' : '') + d.name;
     const badge = document.createElement('span'); badge.className = 'badge';
     if (d.status) { badge.textContent = d.status; badge.classList.add(d.status === '已导出' ? 'ok' : d.status.startsWith('失败') ? 'warn' : 'busy'); }
     else if (d.problems && d.problems.length) { badge.textContent = d.problems.length + ' 处无法渲染'; badge.classList.add('warn'); }
@@ -124,20 +151,107 @@ function draw() {
   });
 }
 
+const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+let renderSeq = 0, keepScroll = null;
+
+let editorDoc = null;                                   // the document whose text is in the editor
 async function show(d) {
+  const switching = editorDoc !== d; editorDoc = d;
   current = d; draw();
+  if (switching) { $('editor').value = d.md; $('editor').scrollTop = 0; cursorPos(); }
+  $('docbar').style.display = 'flex'; docbar();
+  await render(!switching);
+}
+// render the current document into the preview (keepPos: stay at the same scroll position)
+async function render(keepPos) {
+  const d = current, seq = ++renderSeq;
   try {
     const r = await (await api('/api/render', Object.assign({}, d, opts()))).json();
-    d.problems = r.problems; draw();
-    $('empty').hidden = true; $('preview').hidden = false; $('preview').srcdoc = r.html;
-    const p = $('problems');
-    if (r.problems.length) {
-      p.style.display = 'block';
-      p.innerHTML = '<b>' + r.problems.length + ' 处卡谋语无法渲染 (预览中显示为红色):</b><br>' +
-        r.problems.map(t => '<code>\\kamotish{' + t.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '}</code>').join('<br>');
-    } else p.style.display = 'none';
+    if (seq !== renderSeq || d !== current) return;                 // a newer render has started
+    d.problems = r.problems; draw(); problemsPanel();
+    const f = $('preview');
+    keepScroll = keepPos && f.contentWindow ? f.contentWindow.scrollY : 0;
+    $('empty').hidden = true; $('work').hidden = false; f.srcdoc = r.html;
   } catch (e) { log('预览失败: ' + e.message); }
 }
+$('preview').onload = () => { const w = $('preview').contentWindow; if (w && keepScroll) w.scrollTo(0, keepScroll); if (pendingLocate) { const p = pendingLocate; pendingLocate = null; flash(p); } };
+
+function problemsPanel() {
+  const d = current, p = $('problems');
+  if (!d || !d.problems || !d.problems.length) { p.style.display = 'none'; return; }
+  p.style.display = 'block';
+  p.innerHTML = '<b>' + d.problems.length + ' 处卡谋语无法渲染 (预览中显示为红色)，点击定位并修改:</b>' +
+    d.problems.map((q, i) => '<div class="p" data-i="' + i + '"><span class="ln">第 ' + q.line + ' 行</span><code>' + esc(q.content) + '</code></div>').join('');
+  p.querySelectorAll('.p').forEach(el => el.onclick = () => locate(d.problems[Number(el.dataset.i)]));
+}
+
+// ---- click a problem: open the editor at it, select it, and show it in the preview
+let pendingLocate = null;
+function locate(q) {
+  setEditing(true);
+  const ed = $('editor'), lines = ed.value.split('\n');
+  let pos = 0; for (let i = 0; i < q.line - 1 && i < lines.length; i++) pos += lines[i].length + 1;
+  const at = ed.value.indexOf(q.source, pos), start = at >= 0 ? at : pos + q.column;
+  ed.focus({ preventScroll: true }); ed.setSelectionRange(start, start + (at >= 0 ? q.source.length : 0));
+  // measure how far down the match is (lines wrap), with an invisible copy of the text
+  const m = $('mirror'); m.style.width = ed.clientWidth + 'px';
+  m.textContent = ed.value.slice(0, start); const mark = document.createElement('span'); mark.textContent = '|'; m.appendChild(mark);
+  ed.scrollTop = Math.max(0, mark.offsetTop - ed.clientHeight / 3);
+  cursorPos(); flash(q);
+}
+function flash(q) {
+  const doc = $('preview').contentDocument; if (!doc) return;
+  const el = doc.querySelectorAll('.kamotish')[q.index];
+  if (!el) { pendingLocate = q; return; }
+  const w = $('preview').contentWindow;                     // scroll only the preview, never the page around it
+  w.scrollTo(0, Math.max(0, el.getBoundingClientRect().top + w.scrollY - w.innerHeight / 2));
+  el.classList.add('kamo-flash'); setTimeout(() => el.classList.remove('kamo-flash'), 1800);
+}
+
+// ---- editor
+function setEditing(on) {
+  $('work').classList.toggle('editing', on); $('editBtn').classList.toggle('on', on); cursorPos();
+}
+$('editBtn').onclick = () => setEditing(!$('work').classList.contains('editing'));
+function cursorPos() {
+  const ed = $('editor'), before = ed.value.slice(0, ed.selectionStart);
+  $('cursorPos').textContent = $('work').classList.contains('editing') ? '第 ' + (before.split('\n').length) + ' 行' : '';
+}
+['keyup', 'click', 'focus'].forEach(t => $('editor').addEventListener(t, cursorPos));
+let editTimer = 0;
+$('editor').addEventListener('input', () => {
+  if (!current) return;
+  current.md = $('editor').value; current.status = null; draw(); docbar(); cursorPos();
+  clearTimeout(editTimer); editTimer = setTimeout(() => render(true), 400);
+});
+$('editor').addEventListener('keydown', e => {
+  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '    '); }
+});
+
+// ---- save
+function docbar() {
+  const d = current; if (!d) return;
+  $('docTitle').innerHTML = (isDirty(d) ? '<span class="dirty">● </span>' : '') + esc(d.name) + (d.dir ? ' <span style="color:var(--muted);font-weight:normal">' + esc(d.dir) + '</span>' : '');
+  $('saveBtn').textContent = d.dir ? '保存到原文件' : '下载修改后的 .md';
+  $('saveBtn').title = d.dir ? '覆盖 ' + d.dir + '/' + d.name : '这个文件是拖进来或选择的，网页不能直接写回原位置；用路径载入的文件才能直接保存';
+  $('saveBtn').disabled = !isDirty(d);
+}
+async function save() {
+  const d = current; if (!d || !isDirty(d)) return;
+  if (d.dir) {
+    try { const j = await (await api('/api/save', { dir: d.dir, name: d.name, md: d.md })).json(); d.saved = d.md; log('已保存 ' + j.saved); }
+    catch (e) { log('保存失败: ' + e.message); }
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([d.md], { type: 'text/markdown;charset=utf-8' })); a.download = d.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    d.saved = d.md; log('已下载 ' + d.name + ' (修改后的版本)');
+  }
+  draw(); docbar();
+}
+$('saveBtn').onclick = save;
+document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); } });
+window.addEventListener('beforeunload', e => { if (docs.some(isDirty)) { e.preventDefault(); e.returnValue = ''; } });
 
 async function exportOne(d) {
   d.status = '导出中…'; draw(); const o = opts(); const t0 = Date.now();
@@ -160,7 +274,10 @@ $('all').onclick = async () => {
   for (let i = 0; i < docs.length; i++) { log('导出 ' + (i + 1) + '/' + docs.length + ': ' + docs[i].name); await exportOne(docs[i]); }
   $('all').disabled = false; log('全部完成: ' + docs.filter(d => d.status === '已导出').length + '/' + docs.length);
 };
-$('clear').onclick = () => { docs.length = 0; current = null; $('preview').hidden = true; $('empty').hidden = false; $('problems').style.display = 'none'; draw(); };
+$('clear').onclick = () => {
+  if (docs.some(isDirty) && !confirm('有未保存的修改，清空会丢掉这些修改。继续吗？')) return;
+  docs.length = 0; current = null; editorDoc = null; $('work').hidden = true; $('empty').hidden = false; $('problems').style.display = 'none'; $('docbar').style.display = 'none'; draw();
+};
 
 // ---- adding files
 const isMd = n => /\.(md|markdown)$/i.test(n);

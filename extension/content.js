@@ -29,7 +29,8 @@
     const parent = el.parentElement, pi = parent ? info(parent) : null;
     const display = getComputedStyle(el).display;
     const inline = /^(inline|contents|ruby)/.test(display) || display === 'inline-block';
-    const skip = (pi && pi.skip) || display === 'none' || SKIP.has(el.nodeName.toUpperCase()) || el.isContentEditable || el.classList.contains(WRAP);
+    const skip = (pi && pi.skip) || display === 'none' || SKIP.has(el.nodeName.toUpperCase()) || el.isContentEditable || el.classList.contains(WRAP) ||
+                 el.getAttribute('data-kamotish') === 'off';                 // a page can opt out of the extension
     r = { root: (inline && pi && pi.root) ? pi.root : el, skip };
     infoCache.set(el, r); return r;
   }
@@ -142,6 +143,7 @@
   const TEXT_INPUT = /^(text|search|url|email|tel|)$/i;
   function editableOf(t) {
     if (!t || t.nodeType !== 1) return null;
+    if (t.closest && t.closest('[data-kamotish="off"]')) return null;
     const n = t.nodeName;
     if (n === 'TEXTAREA' || (n === 'INPUT' && TEXT_INPUT.test(t.type || ''))) return t;
     if (t.isContentEditable) { let h = t; while (h.parentElement && h.parentElement.isContentEditable) h = h.parentElement; return h; }

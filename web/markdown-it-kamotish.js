@@ -39,7 +39,11 @@
         if (r) r[0] = r[0].replace(/\\([{}\\])/g, '$1');                     // … then ours
       } else return false;
       if (!r) return false;                                    // no closing brace: leave the text as it is
-      if (!silent) state.push('kamotish', '', 0).content = r[0].replace(/\s+/g, ' ').trim();
+      if (!silent) {
+        const t = state.push('kamotish', '', 0);
+        t.content = r[0].replace(/\s+/g, ' ').trim();
+        t.meta = { start, end: r[1] + 1 };                     // position in the inline source (to find the line again)
+      }
       state.pos = r[1] + 1;
       return true;
     });
