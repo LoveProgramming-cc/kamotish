@@ -12,6 +12,7 @@
 <script src="markdown-it-kamotish.js"></script>
 <script src="kamotish-markdown.js"></script>
 <script src="kamotish-files.js"></script>
+<link rel="stylesheet" href="writer/style.css">
 <style>
 :root { --bg: #f6f4ee; --panel: #fff; --fg: #1d1d1b; --muted: #75716a; --line: #dedad0; --accent: #1e3a48; --accent-fg: #fff;
         --warn: #b3261e; --warn-bg: #fdeeec; --warn-line: #f2c9c4; --ok: #2e7d32; --ok-bg: #e6f2e7; --hover: rgba(128,128,128,.12); --sel: #e2ebef; }
@@ -29,7 +30,9 @@ header h1 { font-size: 16px; margin: 10px 8px 10px 0; }
 .mode { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--hover); color: var(--muted); }
 .mode.local { background: var(--ok-bg); color: var(--ok); }
 nav { display: flex; gap: 2px; margin-left: auto; }
-nav button { font: inherit; border: 0; background: none; color: var(--muted); padding: 12px 12px 10px; cursor: pointer; border-bottom: 2px solid transparent; }
+nav button { transition: background .15s, color .15s; font: inherit; border: 0; background: none; color: var(--muted); padding: 12px 12px 10px; cursor: pointer; border-bottom: 2px solid transparent; }
+nav button:hover { background: var(--hover); }
+nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
 nav button.on { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
 main { flex: 1; min-height: 0; display: flex; }
 main > section { flex: 1; min-width: 0; min-height: 0; }
@@ -62,6 +65,12 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
 #drop.over { border-color: var(--accent); background: var(--sel); }
 .row[hidden] { display: none; }
 .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.import-picker { position:relative; color:var(--fg); text-align:left; }
+.import-picker summary { list-style:none; cursor:pointer; padding:5px 12px; border:1px solid var(--line); border-radius:6px; background:var(--panel); }
+.import-picker summary::-webkit-details-marker { display:none; }
+.import-picker summary span { margin-left:14px; color:var(--muted); }
+.import-items { position:absolute; left:0; top:calc(100% + 5px); display:grid; gap:3px; min-width:175px; padding:5px; z-index:90; border:1px solid var(--line); background:var(--panel); border-radius:8px; box-shadow:0 8px 24px #0002; }
+.import-items button.b { text-align:left; border:0; padding:7px 9px; }
 #drop .row { justify-content: center; margin-top: 8px; }
 .side { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
 .side label { display: flex; align-items: center; gap: 6px; }
@@ -109,11 +118,11 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
 <header>
   <h1>卡谋语工具</h1>
   <span class="mode" id="mode">在线版</span>
-  <nav>
-    <button data-tab="doc">文档 → PDF</button>
-    <button data-tab="try">试写</button>
-    <a class="b" href="writer/">文稿编辑器</a>
-    <button data-tab="dl">下载与说明</button>
+  <nav role="tablist" aria-label="工作区">
+    <button data-tab="doc" role="tab" aria-controls="tab-doc">文档 → PDF</button>
+    <button data-tab="writer" role="tab" aria-controls="tab-writer">文稿编辑</button>
+    <button data-tab="try" role="tab" aria-controls="tab-try">试写</button>
+    <button data-tab="dl" role="tab" aria-controls="tab-dl">下载与说明</button>
   </nav>
 </header>
 <main>
@@ -121,8 +130,10 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
     <aside>
       <div id="drop">把 .md 文件或文件夹拖到这里
         <div class="row">
-          <button class="b" id="pickFiles">选择文件</button>
-          <button class="b" id="pickDir">选择文件夹</button>
+          <details class="import-picker"><summary>导入文件 <span>⌄</span></summary><div class="import-items">
+            <button class="b" id="pickFiles">单个 / 多个文件…</button>
+            <button class="b" id="pickDir">整个文件夹…</button>
+          </div></details>
         </div>
         <input type="file" id="files" accept=".md,.markdown,text/markdown,image/*" multiple hidden>
         <input type="file" id="dirInput" webkitdirectory hidden>
@@ -151,7 +162,7 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
         <span id="cursorPos"></span>
         <button class="b" id="editBtn" title="打开源码编辑 (左源码、右预览)">编辑</button>
         <button class="b" id="saveBtn" disabled>保存</button>
-        <button class="b" id="writerBtn">在文稿编辑器中打开</button>
+        <button class="b" id="writerBtn">编辑文稿</button>
         <button class="b primary" id="pdfBtn">导出 PDF</button>
       </div>
       <div id="problems"></div>
@@ -167,6 +178,8 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
       <div id="log"></div>
     </div>
   </section>
+
+  <section id="tab-writer" class="writer-root" aria-label="文稿编辑工作区" hidden></section>
 
   <section id="tab-try" class="scroll" hidden>
     <div class="wrap">
@@ -211,6 +224,8 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
     </div>
   </section>
 </main>
+<script src="writer/ime.js"></script>
+<script src="writer/app.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

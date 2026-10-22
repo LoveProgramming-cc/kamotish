@@ -41,13 +41,13 @@ window.KamoIME = (() => {
   async function init() {
     // xpinyin provides a legitimate, broad single-character reading database even locally.
     try {
-      const res=await fetch('data/xpinyin-fallback.json');
+      const res=await fetch('writer/data/xpinyin-fallback.json');
       if (!res.ok) throw Error(`fallback HTTP ${res.status}`);
       Object.assign(fallback,await res.json());
       update('xpinyin 已加载 · 汉字单字候选可用');
     } catch(err) { update('基础字表未加载 · 仍可输入字素 / 拟素'); }
     try {
-      const r=await fetch('data/rime-index.json', {cache:'no-cache'});
+      const r=await fetch('writer/data/rime-index.json', {cache:'no-cache'});
       if(!r.ok) throw Error(`HTTP ${r.status}`);
       const manifest=await r.json();
       if(!manifest.shardRoot || !Array.isArray(manifest.characters)) throw Error('词库索引损坏');
@@ -61,7 +61,7 @@ window.KamoIME = (() => {
   function shardFor(key) {return shards[key[0]] || null;}
   function loadShard(ch) {
     if(!index || !index.characters.includes(ch) || shards[ch] || loading.has(ch))return loading.get(ch)||Promise.resolve();
-    const p=fetch(index.shardRoot+ch+'.json').then(r=>{if(!r.ok)throw Error(r.status);return r.json()})
+    const p=fetch('writer/'+index.shardRoot+ch+'.json').then(r=>{if(!r.ok)throw Error(r.status);return r.json()})
       .then(data=>{shards[ch]=data; update();})
       .catch(()=>{update('部分雾凇词库分片不可用, 正在使用已加载词库');})
       .finally(()=>loading.delete(ch));

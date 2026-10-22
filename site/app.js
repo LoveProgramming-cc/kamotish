@@ -33,13 +33,20 @@ async function detectLocal() {
 }
 
 // ------------------------------------------------------------------ tabs
+let writerReady = null, writerInstance = null, currentTab = null;
 function tab(name) {
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  if (currentTab === 'writer' && name === 'doc' && writerInstance) acceptWriterDocument(writerInstance.exportDocument());
+  if (name !== 'writer') writerInstance?.deactivate();
+  currentTab = name;
+  if (name === 'writer') ensureWriter().then(writer => writer.activate()).catch(e => { $('tab-writer').textContent = '编辑器载入失败: ' + e.message; });
+  document.querySelectorAll('nav button').forEach(b => { b.classList.toggle('on', b.dataset.tab === name); b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
   document.querySelectorAll('main > section').forEach(s => { s.hidden = s.id !== 'tab-' + name; });
   store.set('tab', name);
+  history.replaceState(null, '', '#' + name);
 }
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => tab(b.dataset.tab));
-tab($('tab-' + store.get('tab')) ? store.get('tab') : 'doc');
+const initialTab = location.hash.slice(1) || store.get('tab');
+tab($('tab-' + initialTab) ? initialTab : 'doc');
 
 // ------------------------------------------------------------------ try it
 const css = document.createElement('style'); css.textContent = window.Kamotish.css; document.head.appendChild(css);
@@ -192,7 +199,7 @@ async function save() {
   draw(); docbar();
 }
 $('saveBtn').onclick = save;
-document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); } });
+document.addEventListener('keydown', e => { if (!$('tab-doc').hidden && (e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); } });
 window.addEventListener('beforeunload', e => { if (docs.some(isDirty)) { e.preventDefault(); e.returnValue = ''; } });
 
 // ------------------------------------------------------------------ PDF
@@ -233,17 +240,32 @@ async function documentForWriter(d) {
   }
   return result;
 }
-$('writerBtn').onclick = () => {
+function ensureWriter() {
+  if (!writerReady) writerReady = (async () => {
+    const response = await fetch('writer/editor.html');
+    if (!response.ok) throw new Error('无法载入编辑器');
+    $('tab-writer').innerHTML = await response.text();
+    writerInstance = window.KamotishWriter.mount($('tab-writer'), {
+      onExport: d => { acceptWriterDocument(d); tab('doc'); }
+    });
+    return writerInstance;
+  })();
+  return writerReady;
+}
+function acceptWriterDocument(d) {
+  let existing = docs.find(x => x.name === d.name && (x.documentPath || '') === (d.documentPath || ''));
+  if (existing) { Object.assign(existing, d); existing.status = null; existing.problems = KM.problems(md, existing.md, window.Kamotish); }
+  else { existing = Object.assign({ saved: d.md, problems: KM.problems(md, d.md, window.Kamotish) }, d); docs.push(existing); }
+  editorDoc = null; show(existing);
+}
+$('writerBtn').onclick = async () => {
   if (!current) return;
-  const d = current, child = window.open('writer/#import', '_blank');
-  if (!child) return log('请允许打开编辑器窗口');
-  const ready = async e => {
-    if (e.origin !== location.origin || e.source !== child || e.data?.type !== 'kamotish-writer-ready') return;
-    window.removeEventListener('message', ready);
-    try { child.postMessage({ type: 'kamotish-import', document: await documentForWriter(d) }, location.origin); }
-    catch (error) { log('打开文稿失败: ' + error.message); }
-  };
-  window.addEventListener('message', ready);
+  try {
+    const d = await documentForWriter(current), writer = await ensureWriter();
+    current.documentPath = d.documentPath || '/' + encodeURIComponent(d.name);
+    d.documentPath = current.documentPath;
+    writer.openMarkdown(d); tab('writer');
+  } catch (error) { log('打开文稿失败: ' + error.message); }
 };
 $('pdfBtn').onclick = () => {
   if (!current) return;
@@ -274,11 +296,13 @@ $('clear').onclick = () => {
 const { fromFile, readEntries, collectDirHandle } = window.KamotishFiles;
 const MD_TYPES = [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }];
 $('pickFiles').onclick = async () => {
+  $('pickFiles').closest('details')?.removeAttribute('open');
   if (!window.showOpenFilePicker) return $('files').click();
   try { const hs = await window.showOpenFilePicker({ multiple: true, types: MD_TYPES }); add(await Promise.all(hs.map(async h => fromFile(await h.getFile(), h)))); }
   catch (e) { if (e.name !== 'AbortError') log(e.message); }
 };
 $('pickDir').onclick = async () => {
+  $('pickDir').closest('details')?.removeAttribute('open');
   if (!window.showDirectoryPicker) return $('dirInput').click();
   try { const entries = []; await collectDirHandle(await window.showDirectoryPicker({ mode: 'readwrite' }), entries); add(await readEntries(entries)); }
   catch (e) { if (e.name !== 'AbortError') log(e.message); }

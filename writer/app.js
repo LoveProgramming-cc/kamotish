@@ -1,12 +1,14 @@
 'use strict';
+window.KamotishWriter = { mount(container, options = {}) {
 /* Kamotish Writer v2: selectable SVG units, versioned native document and custom UI. */
-const $ = id => document.getElementById(id);
+const $ = id => container.querySelector('#kw-' + id);
+let openedDocument = null, baseline = '', automaticZoom = !localStorage.getItem('kamotish-writer-zoom');
 const editor=$('editor'), ime=$('ime'), layout=$('layout'), workspace=$('workspace');
 const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const NAMED_TONES=['一声','二声','三声','四声'];
 const GLYPH=/^\\([a-z][a-z']*\d?)(?:\\([1-4]))?/;
 const KNOWN_GLYPHS=new Set(Kamotish.graphemeNames());
-const PRESETS={block:[['p','正文'],['h1','标题 1'],['h2','标题 2'],['h3','标题 3'],['blockquote','引用']],font:[['serif','宋体 / Serif'],['sans-serif','黑体 / Sans'],['monospace','等宽字体']],size:['12','14','16','18','20','24','30','36','48'].map(x=>[x,x+' px']),zoom:[.5,.65,.75,.85,1,1.1,1.25,1.5,1.75,2].map(x=>[String(x),Math.round(x*100)+'%'])};
+const PRESETS={block:[['p','正文'],['h1','标题 1'],['h2','标题 2'],['h3','标题 3'],['blockquote','引用']],font:[['serif','宋体 / Serif'],['sans-serif','黑体 / Sans'],['monospace','等宽字体']],size:['12','14','16','18','20','24','30','36','48'].map(x=>[x,x+' px']),zoom:[.5,.65,.75,.85,1,1.1,1.25,1.5,1.75,2].map(x=>[String(x),Math.round(x*100)+'%']).concat([['fit','适合宽度']])};
 let mode='kamo', composing='', items=[],active=0,selectionBefore=null,saveTimer,selectedToneUnit=null,zoom=1,dropdownType='',swatchColor='#24313d',docId=crypto.randomUUID?.()||String(Date.now());
 function notify(s){let t=$('toast');t.textContent=s;t.classList.add('show');clearTimeout(t._timer);t._timer=setTimeout(()=>t.classList.remove('show'),2600)}
 function filename(){return ($('docTitle').value||'Kamotish').replace(/[\\/:*?"<>|]/g,'_')}
@@ -117,28 +119,37 @@ editor.addEventListener('keydown',e=>{if(mode!=='kamo'||e.isComposing||e.ctrlKey
 });
 // Toolbar dropdowns are custom listboxes: no browser-native select controls.
 const menu=$('dropdown');
-function closeDropdown(){menu.hidden=true;dropdownType='';document.querySelectorAll('.menuAnchor[aria-expanded="true"]').forEach(b=>b.setAttribute('aria-expanded','false'))}
-function openMenu(anchor,type){if(!menu.hidden&&dropdownType===type){closeDropdown();return}closeTone();saveSelection();dropdownType=type;document.querySelectorAll('.menuAnchor').forEach(b=>b.setAttribute('aria-expanded',String(b===anchor)));menu.replaceChildren();
- if(type==='color'){const grid=document.createElement('div');grid.className='swatchGrid';for(const color of ['#252b32','#5f6875','#e34b50','#dc8b2c','#e4c141','#348e6a','#168c9b','#335eae','#7444af','#c3429a','#ffffff','#000000']){const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=color;b.setAttribute('aria-label',color);b.onclick=()=>{applyFormat('foreColor',color);swatchColor=color;document.querySelector('.colorMark').style.borderBottomColor=color;closeDropdown()};grid.append(b)}menu.append(grid)}
- else for(const [val,label] of PRESETS[type]||[]){const b=document.createElement('button');b.className='menuItem';b.setAttribute('role','option');b.dataset.value=val;b.innerHTML=`<span>${safe(label)}</span>`;b.onclick=()=>{if(type==='zoom')setZoom(Number(val));else if(type==='block')applyBlock(val);else if(type==='font')applyFont(val);else if(type==='size')applySize(Number(val));closeDropdown()};menu.append(b)}
- placeFixed(menu,anchor.getBoundingClientRect());}
-document.querySelectorAll('[data-menu]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();openMenu(b,b.dataset.menu)}));
-menu.addEventListener('keydown',e=>{const btns=[...menu.querySelectorAll('button')];let index=btns.indexOf(document.activeElement);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();btns[(index+(e.key==='ArrowDown'?1:btns.length-1))%btns.length]?.focus()}else if(e.key==='Escape')closeDropdown()});
-document.addEventListener('pointerdown',e=>{if(!e.target.closest('#dropdown,.menuAnchor'))closeDropdown();if(!e.target.closest('#tonePicker,.kw-unit'))closeTone()});
+function closeDropdown(){menu.hidden=true;dropdownType='';container.querySelectorAll('.menuAnchor[aria-expanded="true"]').forEach(b=>b.setAttribute('aria-expanded','false'))}
+function openMenu(anchor,type){if(!menu.hidden&&dropdownType===type){closeDropdown();return}closeTone();saveSelection();dropdownType=type;container.querySelectorAll('.menuAnchor').forEach(b=>b.setAttribute('aria-expanded',String(b===anchor)));menu.replaceChildren();
+ menu.setAttribute('role',type==='file'?'menu':'listbox');
+ if(type==='file'){
+   const entries=[['导入',''],['导入单个文件…','Markdown、原生文稿、文本',()=>$('fileInput').click()],['导入文件夹…','Markdown 与本地图片',()=>$('folderInput').click()],['导出',''],['保存文稿…','.kamodoc · 保留格式与插图',saveNative],['导出 Markdown…','.md · 与文档工具互通',exportMd]];
+   for(const [label,hint,action] of entries){
+     const el=document.createElement(action?'button':'div');
+     if(action){el.className='menuItem fileMenuItem';el.setAttribute('role','menuitem');el.innerHTML='<span>'+safe(label)+'</span><small>'+safe(hint)+'</small>';el.onclick=()=>{closeDropdown();action();};}
+     else{el.className='menuHeading';el.textContent=label;}
+     menu.append(el);
+   }
+ }else if(type==='color'){const grid=document.createElement('div');grid.className='swatchGrid';for(const color of ['#252b32','#5f6875','#e34b50','#dc8b2c','#e4c141','#348e6a','#168c9b','#335eae','#7444af','#c3429a','#ffffff','#000000']){const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=color;b.setAttribute('aria-label',color);b.onclick=()=>{applyFormat('foreColor',color);swatchColor=color;container.querySelector('.colorMark').style.borderBottomColor=color;closeDropdown()};grid.append(b)}menu.append(grid)}
+ else for(const [val,label] of PRESETS[type]||[]){const b=document.createElement('button');b.className='menuItem';b.setAttribute('role','option');b.dataset.value=val;b.innerHTML=`<span>${safe(label)}</span>`;b.onclick=()=>{if(type==='zoom'){if(val==='fit'){automaticZoom=true;localStorage.removeItem('kamotish-writer-zoom');fitWidth();}else setZoom(Number(val));}else if(type==='block')applyBlock(val);else if(type==='font')applyFont(val);else if(type==='size')applySize(Number(val));closeDropdown()};menu.append(b)}
+ placeFixed(menu,anchor.getBoundingClientRect());if(type==='file')menu.querySelector('button')?.focus();}
+container.querySelectorAll('[data-menu]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();openMenu(b,b.dataset.menu)}));
+menu.addEventListener('keydown',e=>{const btns=[...menu.querySelectorAll('button')];let index=btns.indexOf(document.activeElement);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();btns[(index+(e.key==='ArrowDown'?1:btns.length-1))%btns.length]?.focus()}else if(e.key==='Escape'){const anchor=container.querySelector('[data-menu="'+dropdownType+'"]');closeDropdown();anchor?.focus();}});
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('#kw-dropdown,.menuAnchor'))closeDropdown();if(!e.target.closest('#kw-tonePicker,.kw-unit'))closeTone()});
 function formatKw(command,value,units){for(const u of units){if(command==='bold')u.style.fontWeight=u.style.fontWeight==='bold'?'':'bold';if(command==='italic')u.style.fontStyle=u.style.fontStyle==='italic'?'':'italic';if(command==='underline')u.style.textDecoration=u.style.textDecoration.includes('underline')?'':'underline';if(command==='strikeThrough')u.style.textDecoration=u.style.textDecoration.includes('line-through')?'':'line-through';if(command==='foreColor')u.style.color=value;if(command==='fontName')u.style.fontFamily=value;if(command==='fontSize')u.style.fontSize=value+'px';}}
 function applyFormat(cmd,value){restoreSelection();const s=getSelection(),units=s.rangeCount?selectedUnits(s.getRangeAt(0)):[];document.execCommand(cmd,false,value===undefined?null:value);if(units.length)formatKw(cmd,value,units);changed()}
 function applyBlock(tag){restoreSelection();document.execCommand('formatBlock',false,tag==='blockquote'?'blockquote':tag);changed()}
 function applyFont(font){restoreSelection();applyFormat('fontName',font)}
 function applySize(px){restoreSelection();const units=getSelection()?.rangeCount?selectedUnits(getSelection().getRangeAt(0)):[];document.execCommand('fontSize',false,'3');editor.querySelectorAll('font[size="3"]').forEach(f=>{f.removeAttribute('size');f.style.fontSize=px+'px'});formatKw('fontSize',px,units);changed()}
-document.querySelectorAll('[data-cmd]').forEach(b=>{b.addEventListener('mousedown',e=>e.preventDefault());b.onclick=()=>applyFormat(b.dataset.cmd)});
+container.querySelectorAll('[data-cmd]').forEach(b=>{b.addEventListener('mousedown',e=>e.preventDefault());b.onclick=()=>applyFormat(b.dataset.cmd)});
 $('undoBtn').onclick=()=>{editor.focus();document.execCommand('undo');changed()};$('redoBtn').onclick=()=>{editor.focus();document.execCommand('redo');changed()};
 // Zoom uses CSS layout zoom, not a transform: caret, DOM selection and popup coordinates stay correct.
-function setZoom(z){zoom=Math.min(2,Math.max(.5,Math.round(z*100)/100));document.documentElement.style.setProperty('--doc-zoom',String(zoom));$('zoomLevel').textContent=Math.round(zoom*100)+'%';localStorage.setItem('kamotish-writer-zoom',String(zoom))}
+function setZoom(z,persist=true){zoom=Math.min(2,Math.max(.5,Math.round(z*100)/100));container.style.setProperty('--doc-zoom',String(zoom));$('zoomLevel').textContent=Math.round(zoom*100)+'%';if(persist){automaticZoom=false;localStorage.setItem('kamotish-writer-zoom',String(zoom));}}
 $('zoomOut').onclick=()=>setZoom(zoom-.1);$('zoomIn').onclick=()=>setZoom(zoom+.1);
 workspace.addEventListener('wheel',e=>{if(e.ctrlKey){e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*.01))}},{passive:false});
 // Safari sends proprietary gesture events on some trackpads.
 let gestureBase=1;workspace.addEventListener('gesturestart',e=>{e.preventDefault();gestureBase=zoom},{passive:false});workspace.addEventListener('gesturechange',e=>{e.preventDefault();setZoom(gestureBase*e.scale)},{passive:false});workspace.addEventListener('gestureend',e=>e.preventDefault(),{passive:false});
-$('sideToggle').onclick=()=>{const collapsed=layout.classList.toggle('collapsed');$('sideToggle').setAttribute('aria-expanded',String(!collapsed));localStorage.setItem('kamotish-writer-sidebar',collapsed?'hidden':'visible')};
+$('sideToggle').onclick=()=>{if(matchMedia('(max-width:760px)').matches){const opened=layout.classList.toggle('outline-open');layout.classList.remove('collapsed');$('sideToggle').setAttribute('aria-expanded',String(opened));return;}const collapsed=layout.classList.toggle('collapsed');$('sideToggle').setAttribute('aria-expanded',String(!collapsed));localStorage.setItem('kamotish-writer-sidebar',collapsed?'hidden':'visible')};
 // Insert dialog with live SVG preview, no window.prompt().
 function sourceValue(){const value=$('kamoSource').value.trim();return value.startsWith('\\kamotish{')&&value.endsWith('}')?value.slice('\\kamotish{'.length,-1):value}
 function openInsert(){saveSelection();$('kamoDialog').hidden=false;$('kamoSource').value='\\mi\\wou\\3中国人\\mou\\2';updatePreview();$('kamoSource').focus()}
@@ -178,7 +189,7 @@ function astToNode(n){if(!n||typeof n!=='object')return document.createTextNode(
 }
 function exportNative(){return {format:'Kamotish Writer',schemaVersion:2,id:docId,title:$('docTitle').value,createdBy:'Kamotish Writer 2',savedAt:new Date().toISOString(),page:{size:'A4'},content:[...editor.childNodes].map(nodeToAst).filter(Boolean)}}
 function importNative(doc){if(doc?.format!=='Kamotish Writer'||doc.schemaVersion!==2||!Array.isArray(doc.content))throw Error('不是支持的 .kamodoc 文档 (需要版本 2)');if(doc.content.length>100000)throw Error('文档节点数量异常');editor.replaceChildren(...doc.content.map(astToNode));$('docTitle').value=String(doc.title||'未命名文稿');docId=String(doc.id||docId);changed()}
-$('nativeBtn').onclick=()=>{download(filename()+'.kamodoc',JSON.stringify(exportNative(),null,2),'application/vnd.kamotish-writer+json;charset=utf-8');notify('原生 .kamodoc 文稿已导出')};
+function saveNative(){download(filename()+'.kamodoc',JSON.stringify(exportNative(),null,2),'application/vnd.kamotish-writer+json;charset=utf-8');notify('原生 .kamodoc 文稿已导出');}
 // Markdown intentionally has fewer features than .kamodoc; custom marks are expressed as inline HTML where supported.
 function serializeInline(root,insideRun=false){let out='',kamo='';const flush=()=>{if(kamo){out+='\\kamotish{'+kamo+'}';kamo=''}};
  for(const n of root.childNodes){if(n.nodeType===3){if(insideRun)kamo+=n.textContent;else{flush();out+=n.textContent.replace(/([\\*_`\[\]])/g,'\\$1')}continue}if(n.nodeType!==1)continue;
@@ -206,7 +217,7 @@ function blockMd(n){
  return align&&align!=='left'?`<div style="text-align:${align}">\n\n${result}\n\n</div>`:result;
 }
 function exportMarkdown(){return '<!-- Kamotish Writer Markdown. For exact roundtrip, use .kamodoc -->\n\n'+[...editor.childNodes].map(blockMd).filter(Boolean).join('\n\n').trim()+'\n'}
-$('mdBtn').onclick=()=>{download(filename()+'.md',exportMarkdown(),'text/markdown;charset=utf-8');notify('Markdown 已导出')};$('pdfBtn').onclick=()=>{stopIme();closeTone();closeDropdown();const old=document.title;document.title=filename();window.addEventListener('afterprint',()=>{document.title=old},{once:true});window.print()};
+function exportMd(){download(filename()+'.md',exportMarkdown(),'text/markdown;charset=utf-8');notify('Markdown 已导出');}$('pdfBtn').onclick=()=>{deactivate();options.onExport?.(exportDocument())};
 const markdown = window.markdownit({html:true,linkify:true}).use(window.markdownitKamotish, Kamotish);
 markdown.renderer.rules.kamotish = (tokens,i) => makeKamoRun(tokens[i].content).outerHTML;
 function importMarkdown(source, {imageSources,documentPath}={}) {
@@ -222,8 +233,7 @@ function importMarkdown(source, {imageSources,documentPath}={}) {
  editor.replaceChildren(...[...dom.body.childNodes].map(nodeToAst).filter(Boolean).map(astToNode));
  changed();
 }
-function openMarkdown(d){importMarkdown(d.md,d);$('docTitle').value=d.name.replace(/\.(md|markdown)$/i,'');changed();notify('文稿已载入');}
-$('folderBtn').onclick=()=>$('folderInput').click();
+function openMarkdown(d){openedDocument=d;importMarkdown(d.md,d);$('docTitle').value=d.name.replace(/\.(md|markdown)$/i,'');baseline=JSON.stringify(exportNative().content)+$('docTitle').value;changed();notify('文稿已载入');}
 $('folderCancel').onclick=()=>{$('folderDialog').hidden=true;};
 $('folderInput').onchange=async e=>{
  try{
@@ -234,22 +244,32 @@ $('folderInput').onchange=async e=>{
    $('folderDialog').hidden=false;
  }catch(ex){notify('导入失败: '+ex.message);}finally{e.target.value='';}
 };
-window.addEventListener('message',e=>{
- if(e.origin!==location.origin||e.source!==window.opener||e.data?.type!=='kamotish-import')return;
- if(typeof e.data.document?.md!=='string')return;
- openMarkdown(e.data.document);
- history.replaceState(null,'',location.pathname);
-});
-setTimeout(()=>{if(location.hash==='#import'&&window.opener)window.opener.postMessage({type:'kamotish-writer-ready'},location.origin);},0);
-$('importBtn').onclick=()=>$('fileInput').click();
-$('fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{if(f.size>60*1024*1024)throw Error('文件过大 (上限 60 MB)');const src=await f.text();if(/\.kamodoc$/i.test(f.name)){importNative(JSON.parse(src));}else if(/\.html?$/i.test(f.name)){const dom=new DOMParser().parseFromString(src,'text/html');dom.querySelectorAll('script,style,iframe,object,embed').forEach(x=>x.remove());editor.textContent=dom.body.textContent;changed();$('docTitle').value=f.name.replace(/\.[^.]+$/,'');}else{importMarkdown(src);$('docTitle').value=f.name.replace(/\.[^.]+$/,'');}notify('文稿已载入')}catch(ex){notify('导入失败: '+ex.message)}e.target.value=''};
+$('fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{if(f.size>60*1024*1024)throw Error('文件过大 (上限 60 MB)');const src=await f.text();if(/\.kamodoc$/i.test(f.name)){openedDocument=null;importNative(JSON.parse(src));}else if(/\.html?$/i.test(f.name)){openedDocument=null;const dom=new DOMParser().parseFromString(src,'text/html');dom.querySelectorAll('script,style,iframe,object,embed').forEach(x=>x.remove());editor.textContent=dom.body.textContent;changed();$('docTitle').value=f.name.replace(/\.[^.]+$/,'');}else{openMarkdown({name:f.name,md:src});}notify('文稿已载入')}catch(ex){notify('导入失败: '+ex.message)}e.target.value=''};
 function save(){try{localStorage.setItem('kamotish-writer-v2',JSON.stringify(exportNative()));$('saveStatus').textContent='已自动保存'}catch(e){$('saveStatus').textContent='保存失败 · 请导出 .kamodoc'}}
 function restoreDoc(){try{const raw=localStorage.getItem('kamotish-writer-v2');if(raw){importNative(JSON.parse(raw));return true}}catch(e){console.warn('Native recovery failed:',e)}
  try{const v1=JSON.parse(localStorage.getItem('kamotish-writer-v1'));if(v1&&typeof v1.html==='string'&&typeof v1.title==='string'){const dom=new DOMParser().parseFromString(v1.html,'text/html');dom.querySelectorAll('script,style,iframe,object,embed,form,input,button').forEach(x=>x.remove());dom.querySelectorAll('*').forEach(e=>{for(const a of [...e.attributes])if(/^on/i.test(a.name))e.removeAttribute(a.name)});editor.innerHTML=dom.body.innerHTML;$('docTitle').value=v1.title;upgradeOldTokens();notify('已迁移旧版文稿; 建议导出 .kamodoc 备份');return true}}catch(e){console.warn('v1 recovery failed:',e)}return false}
 editor.addEventListener('input',()=>{stopIme();changed()});$('docTitle').addEventListener('input',changed);
-document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();$('nativeBtn').click()}
+container.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveNative()}
  if((e.ctrlKey||e.metaKey)&&['+','=','-','0'].includes(e.key)&&document.activeElement===editor){e.preventDefault();setZoom(e.key==='0'?1:zoom+(e.key==='-'?-.1:.1))}
  if(e.key==='Escape'){if(composing)stopIme();closeTone();closeDropdown();if(!$('kamoDialog').hidden)$('cancelInsert').click()}});
-try{setZoom(Number(localStorage.getItem('kamotish-writer-zoom'))||1)}catch{setZoom(1)}
+try{const savedZoom=localStorage.getItem('kamotish-writer-zoom');if(savedZoom)setZoom(Number(savedZoom));}catch{zoom=1;}
 if(localStorage.getItem('kamotish-writer-sidebar')==='hidden'){layout.classList.add('collapsed');$('sideToggle').setAttribute('aria-expanded','false')}
 restoreDoc();upgradeOldTokens();refreshOutline();save();
+function deactivate(){stopIme();closeTone();closeDropdown();$('kamoDialog').hidden=true;$('folderDialog').hidden=true;}
+function exportDocument(){
+ const name=filename()+'.md',documentPath=openedDocument?.documentPath||'/'+encodeURIComponent(name);
+ const unchanged=openedDocument && baseline===JSON.stringify(exportNative().content)+$('docTitle').value;
+ const imageSources=Object.assign(Object.create(null),openedDocument?.imageSources);
+ for(const img of editor.querySelectorAll('img')){
+   const src=img.dataset.originalSrc||img.getAttribute('src');
+   if(src&&img.src.startsWith('data:image/')){
+     const key=new URL(src,new URL(documentPath,'https://kamotish.invalid/')).pathname;
+     imageSources[key]=img.src;
+   }
+ }
+ return {name:unchanged?openedDocument.name:name,md:unchanged?openedDocument.md:exportMarkdown(),documentPath,imageSources};
+}
+function fitWidth(){if(automaticZoom&&workspace.clientWidth)setZoom(Math.min(1,(workspace.clientWidth-50)/794),false);}
+window.addEventListener('resize',()=>{if(!container.hidden)fitWidth();});
+return {openMarkdown,exportDocument,exportNative,importNative,exportMarkdown,deactivate,activate(){fitWidth();if(matchMedia('(max-width:760px)').matches)$('sideToggle').setAttribute('aria-expanded',String(layout.classList.contains('outline-open')));}};
+} };

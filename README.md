@@ -56,9 +56,9 @@ resources/      原稿、中间产物、样张、备份 (见 resources/README.md
 ## Markdown、插图与页码
 
 - 在线版与本地版都可选择或拖入包含 Markdown 和图片的整个文件夹，按相对路径加载插图。单独选择 `.md` 无法授权读取旁边的图片。
-- 文档预览右上方的“在文稿编辑器中打开”会传递当前源码与已导入图片；也可在编辑器中直接打开 `.md`，或用“打开 MD 文件夹”载入带图片的文稿。
+- 主页面的“文稿编辑”是同页工作区。文档预览中的“编辑文稿”会带入源码与图片，编辑后切回“文档 → PDF”可继续排版。编辑器的“文件”菜单提供单文件导入、文件夹导入、原生文稿保存与 Markdown 导出。
 - 编辑器与试写模式共用 `web/kamotish.js`，字素使用 `\nou`。编辑器读取旧文稿时迁移旧字素 `\no`。
 - PDF 可设置是否加入页码、格式（当前页 / 总页数、仅页码、第 N 页）、底部对齐与字号。在线打印建议使用新版 Chrome / Edge，并关闭浏览器自带“页眉和页脚”，避免重复。默认文件名采用当前 Markdown 文件名。
 - 编辑器中的插图会保存在 `.kamodoc` 中；导出 MD 保留原相对图片路径，分享时须同时带上图片文件夹。
 
-本地统一运行：`npm ci --prefix tools/md2pdf`，然后 `node tools/md2pdf/server.js`。打开 `http://127.0.0.1:4747/`，文稿编辑器在 `/writer/`。编辑器使用的词库及许可说明见 [writer/README.md](writer/README.md)。
+本地统一运行：`npm ci --prefix tools/md2pdf`，然后 `node tools/md2pdf/server.js`。打开 `http://127.0.0.1:4747/`，点击“文稿编辑”；旧 `/writer/` 地址会转到主页面。编辑器使用的词库及许可说明见 [writer/README.md](writer/README.md)。

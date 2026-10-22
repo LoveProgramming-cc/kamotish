@@ -16,6 +16,7 @@ async function main() {
     await new Promise((ok, bad) => { server.stdout.once('data', ok); server.once('error', bad); server.once('exit', code => bad(Error(`Server exited ${code}`))); });
     browser = await puppeteer.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
     const page = await browser.newPage(), errors = [];
+    await page.setViewport({width:1440,height:980});
     page.setDefaultTimeout(15000); page.on('pageerror', e => errors.push(e.message));
     // Exercise the online UI while using the local server for its static files.
     await page.setRequestInterception(true);
@@ -60,44 +61,69 @@ async function main() {
         { file: new File([source], '测试.md'), path: '书/chapters/测试.md' },
         { file: image, path: '书/images/图 片.png' }
       ]);
-      add([d]); show(d);
+      window.testDocument = d; add([d]); show(d);
     }, { source, png });
     await page.waitForFunction(() => document.querySelector('#preview').contentDocument?.querySelector('img')?.naturalWidth > 0);
-    const popupPromise = new Promise(resolve => page.once('popup', resolve));
-    await page.click('#writerBtn'); const writer = await popupPromise;
-    writer.on('pageerror', e => errors.push(e.message)); writer.setDefaultTimeout(15000);
-    await writer.waitForFunction(() => document.querySelector('#docTitle')?.value === '测试');
-    assert.equal(await writer.$$eval('#editor .kamo-err', e => e.length), 0);
-    assert.equal(await writer.$$eval('#editor .kamo-run', e => e.length), 1);
-    assert.equal(await writer.$$eval('#editor table', e => e.length), 1);
-    await writer.waitForFunction(() => document.querySelector('#editor img')?.naturalWidth > 0);
-    const native = await writer.evaluate(() => exportNative().content);
-    await writer.evaluate(() => importNative(exportNative()));
-    assert.deepEqual(await writer.evaluate(() => exportNative().content), native);
-    assert.match(await writer.evaluate(() => exportMarkdown()), /!\[插图\]\(<\.\.\/images\/%E5%9B%BE%20%E7%89%87.png>\)/);
-    assert.equal(await writer.evaluate(() => sourceOfRun(makeKamoRun('\\no\\3'))), '\\nou\\3');
+    const pageCount = (await browser.pages()).length;
+    await page.click('#writerBtn'); const writer = page;
+    await writer.waitForSelector('#kw-editor');
+    await writer.waitForFunction(() => document.querySelector('#kw-docTitle')?.value === '测试');
+    assert.equal((await browser.pages()).length, pageCount, 'Writer must stay in the same browser tab');
+    assert.equal(await page.$eval('nav [data-tab="writer"]', e => e.classList.contains('on')), true);
+    assert.equal(await page.$$eval('.writer-top .topActions button', e => e.length), 2);
+    assert.equal(await writer.$$eval('#kw-editor .kamo-err', e => e.length), 0);
+    assert.equal(await writer.$$eval('#kw-editor .kamo-run', e => e.length), 1);
+    assert.equal(await writer.$$eval('#kw-editor table', e => e.length), 1);
+    await writer.waitForFunction(() => document.querySelector('#kw-editor img')?.naturalWidth > 0);
+    await writer.click('#kw-pdfBtn');
+    assert.equal(await page.$eval('nav [data-tab="doc"]',e=>e.classList.contains('on')),true);
+    assert.equal(await page.evaluate(()=>current.md),source);
+    await page.click('nav [data-tab="writer"]');
+    const selected = await writer.evaluate(() => {
+      const units=document.querySelectorAll('#kw-editor .kw-unit');const range=document.createRange();
+      range.setStartBefore(units[0]);range.setEndAfter(units[1]);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
+      return [...units].filter(e=>range.intersectsNode(e)).length;
+    });
+    assert.equal(selected,2);
+    await writer.click('#kw-fontSize');
+    await writer.evaluate(()=>[...document.querySelectorAll('#kw-dropdown button')].find(b=>b.dataset.value==='20').click());
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit[style*="20px"]',e=>e.length),2);
+    const native = await writer.evaluate(() => writerInstance.exportNative().content);
+    await writer.evaluate(() => writerInstance.importNative(writerInstance.exportNative()));
+    assert.deepEqual(await writer.evaluate(() => writerInstance.exportNative().content), native);
+    assert.match(await writer.evaluate(() => writerInstance.exportMarkdown()), /!\[插图\]\(<\.\.\/images\/%E5%9B%BE%20%E7%89%87.png>\)/);
+    await page.click('nav [data-tab="doc"]');
+    assert.notEqual(await page.evaluate(()=>current.md),source,'Edited text must return to the document workspace');
+    assert.equal(await page.evaluate(()=>docs.filter(d=>d.name==='测试.md').length),1,'Switching workspaces must not duplicate the document');
+    await page.click('nav [data-tab="writer"]');
+    await writer.evaluate(() => writerInstance.openMarkdown({name:'旧文稿.md' ,md:'\\kamotish{\\no\\3}'}));
+    assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>e.dataset.raw),'\\nou\\3');
     assert.equal(await writer.evaluate(() => KamoIME.candidates('nou')[0].value), '\\nou');
     // Direct .md file import, including the user's real document when supplied.
     const input = process.env.KAMOTISH_TEST_MD || path.join(temporary, 'direct.md');
     if (!process.env.KAMOTISH_TEST_MD) fs.writeFileSync(input, source);
-    await (await writer.$('#fileInput')).uploadFile(input);
+    await writer.click('#kw-fileMenu');
+    const chooserPromise = writer.waitForFileChooser();
+    await writer.evaluate(() => [...document.querySelectorAll('#kw-dropdown button')].find(b=>b.textContent.includes('导入单个文件')).click());
+    const chooser = await chooserPromise; assert.equal(chooser.isMultiple(), false); await chooser.accept([input]);
+    await writer.waitForFunction(name=>document.querySelector('#kw-docTitle').value===name,{},path.basename(input).replace(/\.[^.]+$/,''));
     const expected = (fs.readFileSync(input, 'utf8').match(/\\kamotish\{/g) || []).length;
-    await writer.waitForFunction(n => document.querySelectorAll('#editor .kamo-run').length === n, {}, expected);
-    assert.equal(await writer.$$eval('#editor .kamo-run', e => e.length), expected);
+    await writer.waitForFunction(n => document.querySelectorAll('#kw-editor .kamo-run').length === n, {}, expected);
+    assert.equal(await writer.$$eval('#kw-editor .kamo-run', e => e.length), expected);
     if (process.env.KAMOTISH_TEST_MD) {
       const raw = fs.readFileSync(input, 'utf8'), entries = [{ path: 'book/' + path.basename(input), name: path.basename(input), text: raw }];
       const refs = [...raw.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map(m => m[1]);
       for (const ref of new Set(refs)) entries.push({ path: 'book/' + ref, name: path.basename(ref), base64: fs.readFileSync(path.resolve(path.dirname(input), decodeURIComponent(ref))).toString('base64') });
       const count = await writer.evaluate(async entries => {
         const files = entries.map(e => ({ path: e.path, file: new File([e.text === undefined ? Uint8Array.from(atob(e.base64), c => c.charCodeAt(0)) : e.text], e.name, { type: e.text === undefined ? 'image/jpeg' : 'text/markdown' }) }));
-        const [d] = await KamotishFiles.readEntries(files); openMarkdown(d);
-        await Promise.all([...document.querySelectorAll('#editor img')].map(img => img.decode()));
-        return document.querySelectorAll('#editor img').length;
+        const [d] = await KamotishFiles.readEntries(files); writerInstance.openMarkdown(d);
+        await Promise.all([...document.querySelectorAll('#kw-editor img')].map(img => img.decode()));
+        return document.querySelectorAll('#kw-editor img').length;
       }, entries);
       assert.equal(count, refs.length);
-      const actualNative = await writer.evaluate(() => exportNative().content);
-      await writer.evaluate(() => importNative(exportNative()));
-      assert.deepEqual(await writer.evaluate(() => exportNative().content), actualNative);
+      const actualNative = await writer.evaluate(() => writerInstance.exportNative().content);
+      await writer.evaluate(() => writerInstance.importNative(writerInstance.exportNative()));
+      assert.deepEqual(await writer.evaluate(() => writerInstance.exportNative().content), actualNative);
       const listing = await (await fetch(origin + '/api/list?dir=' + encodeURIComponent(path.dirname(input)))).json();
       const loaded = listing.files.find(d => d.name === path.basename(input));
       const handoff = await page.evaluate(async d => { const previous = LOCAL; LOCAL = true; try { return await documentForWriter(d); } finally { LOCAL = previous; } }, loaded);
@@ -105,8 +131,18 @@ async function main() {
       assert(Object.values(handoff.imageSources).every(v => v.startsWith('data:image/')));
       console.log(`PASS: supplied Markdown with ${expected} Kamotish expressions and ${count} decoded local images; native image roundtrip.`);
     }
+    await page.evaluate(()=>{writerInstance.openMarkdown(window.testDocument);document.querySelector('#kw-workspace').scrollTop=0;});
+    await page.waitForFunction(()=>document.querySelector('#kw-docTitle').value==='测试');
+    await page.screenshot({path:'/private/tmp/kamotish-integrated-writer.png',fullPage:true});
+    await page.click('#kw-fileMenu');
+    await page.screenshot({path:'/private/tmp/kamotish-integrated-writer-menu.png',fullPage:true});
+    await page.keyboard.press('Escape');
+    await page.setViewport({width:700,height:900});
+    await page.waitForFunction(()=>getComputedStyle(document.querySelector('#kw-sidebar')).display==='none');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.screenshot({path:'/private/tmp/kamotish-integrated-writer-mobile.png',fullPage:true});
     assert.deepEqual(errors, []);
-    console.log('PASS: print title, three PDF footer formats, local API, page-number toggle, folder images, Writer handoff, native roundtrip, old no migration, direct MD import.');
+    console.log('PASS: print title, three PDF footer formats, local API, page-number toggle, folder images, same-page Writer, file menu import, roundtrip to PDF, native roundtrip, old no migration, direct MD import.');
   } finally {
     if (browser) await browser.close();
     server.kill('SIGINT'); fs.rmSync(temporary, { recursive: true, force: true });

@@ -1,0 +1,54 @@
+<div class="writer-top">
+  <button id="kw-sideToggle" class="iconBtn" title="隐藏或显示文稿目录" aria-label="显示/隐藏侧边栏" aria-expanded="true">☰</button>
+  <div class="writer-title"><span class="writer-eyebrow">文稿编辑</span><input id="kw-docTitle" aria-label="文稿标题" value="未命名文稿"></div>
+  <div class="topActions"><span id="kw-saveStatus">本地自动保存</span><button id="kw-fileMenu" class="menuAnchor" data-menu="file" aria-haspopup="menu" aria-expanded="false">文件 <span class="chevron">⌄</span></button><button id="kw-pdfBtn" class="primary">排版 / PDF</button></div>
+</div>
+<section class="tools" aria-label="排版工具栏">
+  <button id="kw-blockStyle" class="menuAnchor" data-menu="block" title="段落类型" aria-haspopup="listbox">正文 <span class="chevron">⌄</span></button>
+  <button id="kw-fontFamily" class="menuAnchor" data-menu="font" title="字体" aria-haspopup="listbox">宋体 <span class="chevron">⌄</span></button>
+  <button id="kw-fontSize" class="menuAnchor" data-menu="size" title="字号" aria-haspopup="listbox">16 <span class="chevron">⌄</span></button>
+  <span class="separator"></span>
+  <button data-cmd="bold" aria-label="加粗" title="加粗 (⌘/Ctrl+B)"><b>B</b></button>
+  <button data-cmd="italic" aria-label="斜体" title="斜体"><i>I</i></button>
+  <button data-cmd="underline" aria-label="下划线" title="下划线"><u>U</u></button>
+  <button data-cmd="strikeThrough" aria-label="删除线" title="删除线"><s>S</s></button>
+  <button id="kw-colorMenu" class="menuAnchor colorBtn" data-menu="color" title="文字颜色" aria-haspopup="dialog"><span class="colorMark">A</span><span class="chevron">⌄</span></button>
+  <span class="separator"></span>
+  <button data-cmd="justifyLeft" title="左对齐" aria-label="左对齐">☰</button>
+  <button data-cmd="justifyCenter" title="居中" aria-label="居中">≡</button>
+  <button data-cmd="justifyRight" title="右对齐" aria-label="右对齐">☷</button>
+  <button data-cmd="insertUnorderedList" title="无序列表">• 列表</button>
+  <button data-cmd="insertOrderedList" title="有序列表">1. 列表</button>
+  <span class="separator"></span>
+  <button id="kw-undoBtn" aria-label="撤销" title="撤销">↶</button>
+  <button id="kw-redoBtn" aria-label="重做" title="重做">↷</button>
+  <button id="kw-insertKamo">插入卡谋语</button>
+</section>
+<div id="kw-layout" class="writer-layout">
+  <aside id="kw-sidebar" class="sidebar">
+    <div class="sideTitle">文稿目录</div><div id="kw-outline" class="outline"></div>
+    <div class="sideBottom"><strong>输入模式</strong>
+      <div class="switch"><button id="kw-kamoMode" class="active">卡谋语</button><button id="kw-nativeMode">系统中文</button></div>
+      <p>输入字素拼音: 1 为本调字素, 2 为拟素, 3 / 4 / 5 为字素二 / 三 / 四声; 单击已输入字素还能重新选择声调。</p>
+      <p>音节中可按数字直接选择, 空格选择首项; ← / → 保留给光标, ↑ / ↓ 切换候选。</p>
+      <p id="kw-dictionaryStatus" class="dictStatus" aria-live="polite">加载开源中文词库中…</p>
+      <p class="fine">文稿仅保存在浏览器本地。建议定期保存文稿。</p>
+    </div>
+  </aside>
+  <div class="workspace" id="kw-workspace">
+    <div class="pageMeta"><span>A4 · 文档视图</span><span id="kw-counter">0 字</span><div class="zoomControls"><button id="kw-zoomOut" aria-label="缩小文档">−</button><button id="kw-zoomLevel" data-menu="zoom" class="menuAnchor" title="缩放比例">100%</button><button id="kw-zoomIn" aria-label="放大文档">+</button></div></div>
+    <article id="kw-editor" class="paper" contenteditable="true" spellcheck="false" aria-label="正文编辑器">
+      <h1>卡谋语文稿</h1>
+      <p>在这里写下你的文稿。也可以打开 Markdown 文件，继续编辑已有的文字和插图。</p>
+      <p><span class="kamo-token" data-kamo="\mi\wou\3中国人\mou\2"></span></p>
+    </article>
+    <div class="footerHint">双指捏合或 Ctrl + 滚轮缩放 · 点击字素更换声调 · ⌘/Ctrl+S 导出原生文稿</div>
+  </div>
+</div>
+<div id="kw-dropdown" class="dropdown" hidden role="listbox"></div>
+<div id="kw-tonePicker" class="tonePicker" hidden role="dialog" aria-label="字素声调选择"><span class="toneTitle">字素声调</span><div class="toneChoices" id="kw-toneChoices"></div></div>
+<div id="kw-ime" class="ime" hidden><div class="imeHead"><span id="kw-composition"></span><span>卡谋语输入法</span></div><div id="kw-candidates" class="candidates"></div><div class="imeFoot">1 字素 · 2 拟素 · 3/4/5 字素声调 · ↑↓ · Enter/空格 · Esc</div></div>
+<div id="kw-kamoDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-modal="true" aria-label="插入卡谋语"><h2>插入卡谋语</h2><p>输入 <code>\kamotish{...}</code> 中的内容, 或粘贴完整的表达式。</p><textarea id="kw-kamoSource" spellcheck="false" rows="3"></textarea><div class="modalPreview" id="kw-sourcePreview"></div><div class="modalBtns"><button id="kw-cancelInsert">取消</button><button id="kw-confirmInsert" class="primary">插入</button></div></div></div>
+<div id="kw-toast" role="status"></div><input id="kw-fileInput" hidden type="file" accept=".kamodoc,.md,.markdown,.html,.txt,application/json">
+<div id="kw-folderDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-label="选择 Markdown 文档"><h2>选择文档</h2><p>图片将随所选文档一起导入。</p><div id="kw-folderFiles"></div><button id="kw-folderCancel">取消</button></div></div>
+<input id="kw-folderInput" type="file" webkitdirectory hidden>
