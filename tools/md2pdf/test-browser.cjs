@@ -65,7 +65,7 @@ async function main() {
     }, { source, png });
     await page.waitForFunction(() => document.querySelector('#preview').contentDocument?.querySelector('img')?.naturalWidth > 0);
     const pageCount = (await browser.pages()).length;
-    await page.click('#writerBtn'); const writer = page;
+    await page.click('nav [data-tab="writer"]'); const writer = page;
     await writer.waitForSelector('#kw-editor');
     await writer.waitForFunction(() => document.querySelector('#kw-docTitle')?.value === '测试');
     assert.equal((await browser.pages()).length, pageCount, 'Writer must stay in the same browser tab');

@@ -33,12 +33,12 @@ async function detectLocal() {
 }
 
 // ------------------------------------------------------------------ tabs
-let writerReady = null, writerInstance = null, currentTab = null;
+let writerReady = null, writerInstance = null, currentTab = null, writerLinkedDoc = null, writerLinkedText = null;
 function tab(name) {
-  if (currentTab === 'writer' && name === 'doc' && writerInstance) acceptWriterDocument(writerInstance.exportDocument());
+  if (currentTab === 'writer' && name !== 'writer' && writerInstance) acceptWriterDocument(writerInstance.exportDocument());
   if (name !== 'writer') writerInstance?.deactivate();
   currentTab = name;
-  if (name === 'writer') ensureWriter().then(writer => writer.activate()).catch(e => { $('tab-writer').textContent = '编辑器载入失败: ' + e.message; });
+  if (name === 'writer') ensureWriter().then(syncCurrentWriter).catch(e => { $('tab-writer').textContent = '编辑器载入失败: ' + e.message; });
   document.querySelectorAll('nav button').forEach(b => { b.classList.toggle('on', b.dataset.tab === name); b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
   document.querySelectorAll('main > section').forEach(s => { s.hidden = s.id !== 'tab-' + name; });
   store.set('tab', name);
@@ -256,17 +256,20 @@ function acceptWriterDocument(d) {
   let existing = docs.find(x => x.name === d.name && (x.documentPath || '') === (d.documentPath || ''));
   if (existing) { Object.assign(existing, d); existing.status = null; existing.problems = KM.problems(md, existing.md, window.Kamotish); }
   else { existing = Object.assign({ saved: d.md, problems: KM.problems(md, d.md, window.Kamotish) }, d); docs.push(existing); }
+  writerLinkedDoc = existing; writerLinkedText = existing.md;
   editorDoc = null; show(existing);
 }
-$('writerBtn').onclick = async () => {
-  if (!current) return;
-  try {
-    const d = await documentForWriter(current), writer = await ensureWriter();
-    current.documentPath = d.documentPath || '/' + encodeURIComponent(d.name);
-    d.documentPath = current.documentPath;
-    writer.openMarkdown(d); tab('writer');
-  } catch (error) { log('打开文稿失败: ' + error.message); }
-};
+async function syncCurrentWriter(writer) {
+  if (currentTab !== 'writer') return;
+  if (current && (writerLinkedDoc !== current || writerLinkedText !== current.md)) {
+    const selected = current, d = await documentForWriter(selected);
+    if (currentTab !== 'writer') return;
+    selected.documentPath = d.documentPath || '/' + encodeURIComponent(d.name); d.documentPath = selected.documentPath;
+    writer.openMarkdown(d); writerLinkedDoc = selected; writerLinkedText = selected.md;
+  }
+  writer.activate();
+}
+$('writerBtn').onclick = () => { if (current) tab('writer'); };
 $('pdfBtn').onclick = () => {
   if (!current) return;
   if (LOCAL) return exportLocal(current);
