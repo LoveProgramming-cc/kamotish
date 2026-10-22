@@ -52,6 +52,17 @@ async function main() {
     assert(response.ok); assert.match(response.headers.get('content-disposition'), /%E6%B5%8B%E8%AF%95.pdf/);
     const localPdf = path.join(temporary, 'local.pdf'); fs.writeFileSync(localPdf, Buffer.from(await response.arrayBuffer()));
     assert.equal((execFileSync('pdftotext', ['-layout', localPdf, '-'], { encoding: 'utf8' }).match(/第\s*2\s*页/g) || []).length, 1);
+    // The report download uses current source, including edits not yet rendered.
+    await page.evaluate(async()=>{
+      add([{name:'报错测试.md',md:'\\kamotish{\\nou}'}]);
+      const d=docs.find(d=>d.name==='报错测试.md');show(d);d.md='标题\n\n\\kamotish{\\unknown}';
+      window.savedDownload=download;download=async(blob,name)=>{window.errorDownload={name,text:await blob.text()};};
+    });
+    await page.click('#exportProblems');
+    await page.waitForFunction(()=>window.errorDownload);
+    const errorDownload=await page.evaluate(()=>window.errorDownload);
+    assert.equal(errorDownload.name,'卡谋语渲染报错.txt');assert.match(errorDownload.text,/文件：报错测试.md/);assert.match(errorDownload.text,/第 3 行/);assert.match(errorDownload.text,/未知字素/);
+    await page.evaluate(()=>{download=window.savedDownload;});
     // FileReader, relative image paths, nested headings, and shared renderer.
     const source = '# 标题\n\n<!-- C01-P01 -->\n\\kamotish{\\nou\\3中国\\mi}\n\n> 引用\n\n![插图](../images/图%20片.png)\n\n[说明](说明.md)\n\n| A | B |\n|---|---|\n| 1 | 2 |';
     await page.bringToFront();

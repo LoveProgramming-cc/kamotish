@@ -1,0 +1,15 @@
+'use strict';
+const assert = require('node:assert/strict');
+const KM = require('../../web/kamotish-markdown');
+const Kamotish = require('../../web/kamotish').Kamotish;
+const md = KM.create({markdownit:require('markdown-it'),texmath:require('markdown-it-texmath'),katex:require('katex'),Kamotish,kamotishPlugin:require('../../web/markdown-it-kamotish')});
+const text = '# Heading\n\n\\kamotish{\\unknown zzz}\n\n\\kamotish{\\nou}';
+const issues = KM.problems(md,text,Kamotish);
+assert.equal(issues.length,1); assert.equal(issues[0].line,3); assert.equal(issues[0].column,0);
+assert.equal(issues[0].errors.length,2); assert.equal(issues[0].errors[0].text,'\\unknown');
+assert.equal(issues[0].errors[0].reason,'unknown grapheme');
+assert.match(issues[0].errors[1].reason,/cannot read syllable/);
+const report=KM.problemReport(md,[{name:'错误.md',md:text},{name:'正常.md',md:'\\kamotish{\\nou}'}],Kamotish);
+for(const expected of ['检查文件：2 个','无法渲染：1 处','文件：错误.md','第 3 行，第 1 列','源码：\\kamotish{\\unknown zzz}','未知字素','cannot read syllable','文件：正常.md','未发现无法渲染']) assert(report.includes(expected),expected);
+assert.match(KM.problemReport(md,[{name:'已修复.md',md:'\\kamotish{\\nou}'}],Kamotish),/无法渲染：0 处/);
+console.log('PASS: report includes files, counts, locations, exact source, error reasons, and clean results.');

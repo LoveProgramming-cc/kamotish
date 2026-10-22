@@ -124,6 +124,13 @@ $('preview').onload = () => {
   if (pendingFlash) { const q = pendingFlash; pendingFlash = null; flash(q); }
 };
 
+$('exportProblems').onclick = () => {
+  const report = KM.problemReport(md, docs, window.Kamotish);
+  const name = docs.length === 1 ? docs[0].name.replace(/\.(md|markdown)$/i, '') + '_渲染报错.txt' : '卡谋语渲染报错.txt';
+  download(new Blob(['\ufeff', report], { type: 'text/plain;charset=utf-8' }), name);
+  log('已导出 ' + docs.length + ' 个文档的报错报告');
+};
+
 function problemsPanel() {
   const d = current, p = $('problems');
   if (!d || !d.problems.length) { p.style.display = 'none'; return; }

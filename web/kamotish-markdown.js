@@ -45,7 +45,8 @@
     const out = [], lines = text.split('\n'); let index = 0;
     const walk = (toks, parent) => toks.forEach(t => {
       if (t.type === 'kamotish') {
-        if (Kamotish.renderInline(t.content).includes('kamo-err')) {
+        const rendered = Kamotish.renderInline(t.content);
+        if (rendered.includes('kamo-err')) {
           const src = parent.content, source = src.slice(t.meta.start, t.meta.end);
           let line = (parent.map ? parent.map[0] : 0) + (src.slice(0, t.meta.start).match(/\n/g) || []).length;
           let column = lines[line] !== undefined ? lines[line].indexOf(source) : -1;
@@ -54,7 +55,10 @@
             if (at >= 0) { line = (text.slice(0, at).match(/\n/g) || []).length; column = at - text.lastIndexOf('\n', at - 1) - 1; }
             else column = 0;
           }
-          out.push({ index, line: line + 1, column, source, content: t.content });
+          const decode = value => value.replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+          const errors = [...rendered.matchAll(/<span class="kamo-err" title="([^"]*)">([\s\S]*?)<\/span>/g)]
+            .map(m => ({ text: decode(m[2]), reason: decode(m[1]) }));
+          out.push({ index, line: line + 1, column, source, content: t.content, errors });
         }
         index++;
       }
@@ -62,6 +66,22 @@
     });
     walk(md.parse(text, {}), null);
     return out;
+  }
+
+  function problemReport(md, documents, Kamotish) {
+    const entries = documents.map(d => ({ name: d.name, issues: problems(md, d.md, Kamotish) }));
+    const total = entries.reduce((n, d) => n + d.issues.length, 0);
+    const lines = ['卡谋语渲染错误报告', `检查文件：${entries.length} 个`, `无法渲染：${total} 处`, ''];
+    for (const d of entries) {
+      lines.push(`文件：${d.name}`, `结果：${d.issues.length ? d.issues.length + ' 处无法渲染' : '未发现无法渲染的卡谋语'}`);
+      for (const q of d.issues) {
+        lines.push(`第 ${q.line} 行，第 ${Math.max(0, q.column) + 1} 列`, `源码：${q.source}`);
+        for (const e of q.errors) lines.push(`错误片段：${e.text}`, `原因：${e.reason === 'unknown grapheme' ? '未知字素（unknown grapheme）' : e.reason}`);
+        lines.push('');
+      }
+      lines.push('');
+    }
+    return lines.join('\n');
   }
 
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -103,5 +123,5 @@ ${md.render(text, { imageSources: o.imageSources, documentPath: o.documentPath }
 </body></html>`;
   }
 
-  return { create, problems, documentHtml, MATH_FENCES };
+  return { create, problems, problemReport, documentHtml, MATH_FENCES };
 });

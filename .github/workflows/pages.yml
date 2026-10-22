@@ -38,6 +38,7 @@ jobs:
           node --check writer/storage.js
           node --check web/kamotish-files.js
           node writer/tests/test_ime.cjs
+          node tools/md2pdf/test-report.cjs
           python3 -m unittest discover -s writer/tests -p 'test_dictionary.py'
       - name: Build Writer dictionary
         run: python3 writer/scripts/build_rime_ice.py --output-dir writer/data
