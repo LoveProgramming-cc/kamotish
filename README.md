@@ -15,6 +15,7 @@
 | **渲染库** | 一个 JS 文件，没有依赖；网页引入后用 `<kamo-text>` 或 `Kamotish.render()` 显示卡谋语 | [`web/kamotish.js`](web/kamotish.js) |
 | **浏览器插件** | 任何网页 (聊天、文档、论坛) 里的 `\kamotish{…}` 自动显示成卡谋语；输入框里实时预览 | [`extension/`](extension/)、安装包在 [`dist/`](dist/) |
 | **文档工具** | Markdown (含卡谋语和数学公式) 预览、定位并修改写错的卡谋语、导出 PDF。在线版打开即用；本地版另外支持按路径载入、批量导出、自动页码 | 页面 [`site/`](site/)，本地服务 [`tools/md2pdf/`](tools/md2pdf/) |
+| **文稿编辑器** | 输入法、逐字素编辑、直接导入 Markdown（含本地插图）、导出 `.kamodoc` / MD / PDF；与文档工具共用字形库 | [`writer/`](writer/) |
 | **markdown-it 插件** | 在自己的 markdown-it 项目里支持 `\kamotish{…}` | [`web/markdown-it-kamotish.js`](web/markdown-it-kamotish.js) |
 | **字形制作工具** | 从手写原稿到最终字形、再到渲染库的全部 Python 脚本 | [`tools/`](tools/) |
 
@@ -51,3 +52,13 @@ resources/      原稿、中间产物、样张、备份 (见 resources/README.md
 ## 协议
 
 [MIT](LICENSE)。例外：`resources/fonts/` 里的霞鹜漫黑字体使用 SIL Open Font License 1.1。
+
+## Markdown、插图与页码
+
+- 在线版与本地版都可选择或拖入包含 Markdown 和图片的整个文件夹，按相对路径加载插图。单独选择 `.md` 无法授权读取旁边的图片。
+- 文档预览右上方的“在文稿编辑器中打开”会传递当前源码与已导入图片；也可在编辑器中直接打开 `.md`，或用“打开 MD 文件夹”载入带图片的文稿。
+- 编辑器与试写模式共用 `web/kamotish.js`，字素使用 `\nou`。编辑器读取旧文稿时迁移旧字素 `\no`。
+- PDF 可设置是否加入页码、格式（当前页 / 总页数、仅页码、第 N 页）、底部对齐与字号。在线打印建议使用新版 Chrome / Edge，并关闭浏览器自带“页眉和页脚”，避免重复。默认文件名采用当前 Markdown 文件名。
+- 编辑器中的插图会保存在 `.kamodoc` 中；导出 MD 保留原相对图片路径，分享时须同时带上图片文件夹。
+
+本地统一运行：`npm ci --prefix tools/md2pdf`，然后 `node tools/md2pdf/server.js`。打开 `http://127.0.0.1:4747/`，文稿编辑器在 `/writer/`。编辑器使用的词库及许可说明见 [writer/README.md](writer/README.md)。

@@ -27,6 +27,15 @@
       if (!MATH_FENCES.includes(t.info.trim().split(/\s+/)[0].toLowerCase())) return fence(tokens, i, options, env, self);
       return '<div class="math-block">' + d.katex.renderToString(t.content, { displayMode: true, throwOnError: false }) + '</div>\n';
     };
+    const image = md.renderer.rules.image;
+    md.renderer.rules.image = (tokens, i, options, env, self) => {
+      const t = tokens[i], src = t.attrGet('src');
+      if (env.imageSources && src && !/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) {
+        const key = new URL(src, new URL(env.documentPath || '', 'https://kamotish.invalid/')).pathname;
+        if (Object.prototype.hasOwnProperty.call(env.imageSources, key)) t.attrSet('src', env.imageSources[key]);
+      }
+      return image(tokens, i, options, env, self);
+    };
     return md;
   }
 
@@ -59,12 +68,17 @@
 
   function documentHtml(md, text, o) {
     o = Object.assign({ title: 'document', base: '', katexHref: '', paper: 'A4', fontSize: 11 }, o);
+    const position = ['left', 'right'].includes(o.pageAlign) ? o.pageAlign : 'center';
+    const content = o.pageFormat === 'number' ? 'counter(page)' : o.pageFormat === 'chinese'
+      ? '"第 " counter(page) " 页"' : 'counter(page) " / " counter(pages)';
+    const pageFooter = o.pageNumbers ? `@bottom-${position} { content: ${content};
+      font-family: sans-serif; font-size: ${Math.min(16, Math.max(6, Number(o.pageSize) || 8))}pt; color: #888; }` : '';
     return `<!doctype html><html lang="zh" data-kamotish="off"><head><meta charset="utf-8"><title>${esc(o.title)}</title>
 ${o.base ? `<base href="${esc(o.base)}">` : ''}
 ${o.katexHref ? `<link rel="stylesheet" href="${esc(o.katexHref)}">` : ''}
 <style>
 ${o.Kamotish ? o.Kamotish.css : ''}
-@page { size: ${o.paper}; margin: 18mm 16mm 20mm; }
+@page { size: ${o.paper}; margin: 18mm 16mm 20mm; ${pageFooter} }
 body { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
        font-size: ${Number(o.fontSize) || 11}pt; line-height: 1.75; color: #111; background: #fff; }
 @media screen { body { max-width: 46em; margin: 2em auto; padding: 0 1.5em; } }
@@ -85,7 +99,7 @@ img { max-width: 100%; }
 .kamo-flash { outline: 3px solid #f59e0b; outline-offset: 2px; border-radius: 3px; }
 eq { display: inline; } eqn, .math-block { display: block; overflow-x: auto; margin: .8em 0; break-inside: avoid; }
 </style></head><body>
-${md.render(text)}
+${md.render(text, { imageSources: o.imageSources, documentPath: o.documentPath })}
 </body></html>`;
   }
 

@@ -28,12 +28,25 @@ jobs:
           node-version: 20
       - name: Install the libraries (same versions as the local version)
         run: npm ci --prefix tools/md2pdf --ignore-scripts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check Writer and shared scripts
+        run: |
+          node --check site/app.js
+          node --check writer/app.js
+          node --check web/kamotish-files.js
+          node writer/tests/test_ime.cjs
+          python3 -m unittest discover -s writer/tests -p 'test_dictionary.py'
+      - name: Build Writer dictionary
+        run: python3 writer/scripts/build_rime_ice.py --output-dir writer/data
       - name: Assemble site (same files the local server serves)
         run: |
           M=tools/md2pdf/node_modules
           mkdir -p _site/vendor
           cp site/* _site/
-          cp web/kamotish.js web/markdown-it-kamotish.js web/kamotish-markdown.js web/demo.html _site/
+          cp -r writer _site/writer
+          cp web/kamotish.js web/markdown-it-kamotish.js web/kamotish-markdown.js web/kamotish-files.js web/demo.html _site/
           cp dist/kamotish-chrome.zip dist/kamotish-firefox.zip _site/
           cp $M/markdown-it/dist/markdown-it.min.js $M/markdown-it-texmath/texmath.js _site/vendor/
           cp -r $M/katex/dist _site/vendor/katex

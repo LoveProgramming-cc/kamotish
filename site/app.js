@@ -51,17 +51,24 @@ $('src').addEventListener('input', live); live();
 const docs = [];
 let current = null, editorDoc = null;
 const isDirty = d => d.md !== d.saved;
-const opts = () => ({ paper: $('paper').value, fontSize: Number($('size').value), pageNumbers: $('pagenum').checked, saveTo: $('saveTo').value.trim() });
-['paper', 'size', 'saveTo'].forEach(k => {
+const opts = () => ({ paper: $('paper').value, fontSize: Number($('size').value), pageNumbers: $('pagenum').checked, pageFormat: $('pageFormat').value, pageAlign: $('pageAlign').value, pageSize: Number($('pageSize').value), saveTo: $('saveTo').value.trim() });
+['paper', 'size', 'saveTo', 'pageFormat', 'pageAlign', 'pageSize'].forEach(k => {
   if (store.get(k)) $(k).value = store.get(k);
   $(k).addEventListener('change', () => { store.set(k, $(k).value); if (k !== 'saveTo' && current) render(true); });
+});
+
+if (store.get('pagenum') !== null) $('pagenum').checked = store.get('pagenum') === 'true';
+const pageOptions = () => { $('pageOptions').hidden = !$('pagenum').checked; };
+pageOptions();
+$('pagenum').addEventListener('change', () => {
+  store.set('pagenum', String($('pagenum').checked)); pageOptions(); if (current) render(true);
 });
 
 function add(list) {
   list.sort(byName);
   for (const d of list) {
     d.saved = d.md; d.problems = KM.problems(md, d.md, window.Kamotish);
-    const old = docs.findIndex(x => x.name === d.name && (x.dir || '') === (d.dir || ''));
+    const old = docs.findIndex(x => x.name === d.name && (x.dir || x.documentPath || '') === (d.dir || d.documentPath || ''));
     if (old >= 0 && isDirty(docs[old]) && !confirm(d.name + ' 有未保存的修改，重新载入会丢掉这些修改。继续吗？')) continue;
     if (old >= 0) { if (docs[old] === current) current = d; docs[old] = d; } else docs.push(d);
   }
@@ -95,7 +102,7 @@ function show(d) {
 function docHtml(d) {
   const o = opts(), base = LOCAL && d.dir ? location.origin + '/fs' + encodeURI(d.dir) + '/' : '';
   return KM.documentHtml(md, d.md, { title: d.name.replace(/\.(md|markdown)$/i, ''), base, katexHref: KATEX_CSS,
-    paper: o.paper, fontSize: o.fontSize, Kamotish: window.Kamotish });
+    paper: o.paper, fontSize: o.fontSize, pageNumbers: o.pageNumbers, pageFormat: o.pageFormat, pageAlign: o.pageAlign, pageSize: o.pageSize, imageSources: d.imageSources, documentPath: d.documentPath, Kamotish: window.Kamotish });
 }
 function render(keepPos) {
   const d = current; if (!d) return;
@@ -201,17 +208,55 @@ async function post(url, body) {
 async function exportLocal(d) {
   d.status = '导出中…'; draw(); const o = opts(), t0 = Date.now();
   try {
-    const r = await post('api/pdf', { name: d.name, md: d.md, dir: d.dir, paper: o.paper, fontSize: o.fontSize, pageNumbers: o.pageNumbers, saveTo: o.saveTo });
+    const r = await post('api/pdf', { name: d.name, md: d.md, dir: d.dir, imageSources: d.imageSources, documentPath: d.documentPath, paper: o.paper, fontSize: o.fontSize, pageNumbers: o.pageNumbers, pageFormat: o.pageFormat, pageAlign: o.pageAlign, pageSize: o.pageSize, saveTo: o.saveTo });
     if (o.saveTo) { const j = await r.json(); log('已保存 ' + j.saved + ' (' + (j.bytes / 1048576).toFixed(1) + ' MB, ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)'); }
     else { const blob = await r.blob(), name = d.name.replace(/\.(md|markdown)$/i, '') + '.pdf'; download(blob, name); log('已下载 ' + name + ' (' + (blob.size / 1048576).toFixed(1) + ' MB)'); }
     d.status = '已导出';
   } catch (e) { d.status = '失败'; log(d.name + ' 导出失败: ' + e.message); }
   draw();
 }
+async function documentForWriter(d) {
+  const result = { name: d.name, md: d.md, imageSources: d.imageSources, documentPath: d.documentPath };
+  if (LOCAL && d.dir) {
+    result.imageSources = Object.assign(Object.create(null), d.imageSources);
+    result.documentPath = d.documentPath || '/' + encodeURIComponent(d.name);
+    const base = location.origin + '/fs' + d.dir.split('/').map(encodeURIComponent).join('/') + '/';
+    const dom = new DOMParser().parseFromString(docHtml(d), 'text/html');
+    for (const img of dom.querySelectorAll('img')) {
+      const src = img.getAttribute('src');
+      if (!src || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) continue;
+      const response = await fetch(new URL(src, base));
+      if (!response.ok) throw new Error('无法读取插图: ' + src);
+      const key = new URL(src, new URL(result.documentPath, 'https://kamotish.invalid/')).pathname;
+      result.imageSources[key] = await window.KamotishFiles.imageData(await response.blob());
+    }
+  }
+  return result;
+}
+$('writerBtn').onclick = () => {
+  if (!current) return;
+  const d = current, child = window.open('writer/#import', '_blank');
+  if (!child) return log('请允许打开编辑器窗口');
+  const ready = async e => {
+    if (e.origin !== location.origin || e.source !== child || e.data?.type !== 'kamotish-writer-ready') return;
+    window.removeEventListener('message', ready);
+    try { child.postMessage({ type: 'kamotish-import', document: await documentForWriter(d) }, location.origin); }
+    catch (error) { log('打开文稿失败: ' + error.message); }
+  };
+  window.addEventListener('message', ready);
+};
 $('pdfBtn').onclick = () => {
   if (!current) return;
   if (LOCAL) return exportLocal(current);
-  const w = $('preview').contentWindow; w.focus(); w.print();             // online: the browser's own print dialog
+  const w = $('preview').contentWindow, oldTitle = document.title;
+  // Chrome's Save as PDF uses the top-level title even when printing an iframe.
+  document.title = w.document.title = current.name.replace(/\.(md|markdown)$/i, '');
+  const restore = () => {
+    document.title = oldTitle;
+    w.removeEventListener('afterprint', restore); window.removeEventListener('afterprint', restore);
+  };
+  w.addEventListener('afterprint', restore); window.addEventListener('afterprint', restore);
+  try { w.focus(); w.print(); } catch (e) { restore(); throw e; }
 };
 $('all').onclick = async () => {
   if (!opts().saveTo && docs.length > 3 && !confirm('没有填“PDF 存到”文件夹，会触发 ' + docs.length + ' 次浏览器下载。继续吗？')) return;
@@ -226,14 +271,7 @@ $('clear').onclick = () => {
 };
 
 // ------------------------------------------------------------------ adding files
-const fromFile = (f, handle) => f.text().then(text => ({ name: f.name, md: text, handle }));
-async function fromDirHandle(dir, out) {
-  for await (const h of dir.values()) {
-    if (h.kind === 'file' && isMd(h.name)) out.push(await fromFile(await h.getFile(), h));
-    else if (h.kind === 'directory') await fromDirHandle(h, out);
-  }
-  return out;
-}
+const { fromFile, readEntries, collectDirHandle } = window.KamotishFiles;
 const MD_TYPES = [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }];
 $('pickFiles').onclick = async () => {
   if (!window.showOpenFilePicker) return $('files').click();
@@ -242,10 +280,10 @@ $('pickFiles').onclick = async () => {
 };
 $('pickDir').onclick = async () => {
   if (!window.showDirectoryPicker) return $('dirInput').click();
-  try { add(await fromDirHandle(await window.showDirectoryPicker({ mode: 'readwrite' }), [])); }
+  try { const entries = []; await collectDirHandle(await window.showDirectoryPicker({ mode: 'readwrite' }), entries); add(await readEntries(entries)); }
   catch (e) { if (e.name !== 'AbortError') log(e.message); }
 };
-const readInputs = fs => Promise.all([...fs].filter(f => isMd(f.name)).map(f => fromFile(f)));
+const readInputs = fs => readEntries([...fs].map(file => ({ file, path: file.webkitRelativePath || file.name })));
 $('files').onchange = async e => { add(await readInputs(e.target.files)); e.target.value = ''; };
 $('dirInput').onchange = async e => { add(await readInputs(e.target.files)); e.target.value = ''; };
 
@@ -254,23 +292,23 @@ drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = async e => {
   e.preventDefault(); drop.classList.remove('over');
-  const items = [...e.dataTransfer.items].filter(i => i.kind === 'file'), out = [];
+  const items = [...e.dataTransfer.items].filter(i => i.kind === 'file'), entries = [];
   if (items.length && items[0].getAsFileSystemHandle) {                  // Chrome / Edge: handles, so edits can be saved back
     const hs = await Promise.all(items.map(i => i.getAsFileSystemHandle()));   // (all started inside the event)
     for (const h of hs) {
       if (!h) continue;
-      if (h.kind === 'file' && isMd(h.name)) out.push(await fromFile(await h.getFile(), h));
-      else if (h.kind === 'directory') await fromDirHandle(h, out);
+      if (h.kind === 'file') entries.push({ file: await h.getFile(), handle: h, path: h.name });
+      else if (h.kind === 'directory') await collectDirHandle(h, entries);
     }
   } else {
     const walk = ent => new Promise(ok => {
-      if (ent.isFile) { if (isMd(ent.name)) ent.file(f => fromFile(f).then(d => { out.push(d); ok(); }), ok); else ok(); }
+      if (ent.isFile) ent.file(file => { entries.push({ file, path: ent.fullPath.replace(/^\//, '') }); ok(); }, ok);
       else { const rd = ent.createReader(), all = [];
         const more = () => rd.readEntries(es => es.length ? (all.push(...es), more()) : Promise.all(all.map(walk)).then(ok), ok); more(); }
     });
     await Promise.all(items.map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean).map(walk));
   }
-  add(out);
+  add(await readEntries(entries));
 };
 
 // local: load a folder by its path

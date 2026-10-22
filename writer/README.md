@@ -1,0 +1,79 @@
+# Kamotish Writer 2 — 卡谋语长篇文稿编辑器
+
+[中文](#部署到-github-pages) · 完全静态网页 · SVG 字素 / 拟素渲染 · 原生 `.kamodoc` 文稿 · Rime Ice 开源词库
+
+## 本次更新 (2.0)
+
+1. **修复示例多余的反斜杠。** 示例现在写作单层 `\mi\wou\3中国人\mou\2`。从旧版 `localStorage` 迁移时, 自动修复当时双层反斜杠的错误。
+2. **卡谋语不再锁成一个整体。** 一段卡谋语由多个独立的可选择 SVG 字素或拟素音节组成, 其中的汉字仍然是普通可编辑文字。可以拖选多个字素, 或对单个字素设置下划线、颜色等基本样式。SVG 是显示视图; 其对应的文本源码单独保存。
+3. **快速声调。** 输入 `mi` 后: `1` 为无标记字素, `2` 为拟素, `3` / `4` / `5` 分别为二 / 三 / 四声字素; 不必输入 `Alt` 组合键。单击已经输入的字素, 会出现自定义声调选择菜单, 可直接改为一至四声。二读字素 (`hou2`、`mou2`) 仍按语言规范区分。
+4. **捏合缩放。** Chrome 类浏览器的触控板捏合 (Ctrl + wheel)、Safari 的 gesture 事件, 以及 `+`/`-`/比例菜单, 可设置 50%–200% 的页面视图比例。打印不使用编辑视图的缩放比例。
+5. **侧边栏收起, 页面居中。** 顶栏左侧 `☰` 按钮可以收起/恢复侧边栏, 状态会保存在本机。
+6. **自定义下拉菜单、颜色面板和输入对话框。** 字体、字号、段落样式、颜色及缩放选项不再使用 `<select>` 或系统 `<input type="color">`。插入卡谋语使用自定义带实时 SVG 预览的对话框, 不再使用 `window.prompt()`。
+7. **原生 `.kamodoc` 格式。** 版本化 JSON 文档, 保存文稿标题、所有支持的段落和行内样式、卡谋语字素音节的源代码及声调。SVG 路径是派生视图, 不塞进文档。支持直接打开并保存 `.kamodoc`。自动保存也使用同一数据模型。
+8. **复制卡谋语。** 选中矢量字素再复制/剪切, 剪贴板将得到可编辑的 `\kamotish{...}` 源码; 粘贴完整的该表达式会还原为卡谋语。
+9. **PDF 输出验证。** 基于浏览器打印; 在 Chromium 对测试样张进行的 PDF 输出不含栅格图像, 卡谋语 SVG 仍是路径。浏览器和复杂分页仍有差异, 需要在实际使用中检查。
+
+### 输入法示例
+
+- `mi` → `1` 为字素 `\mi`, `2` 为拟素 `mi`, `3` 为字素 `\mi\2`, `4` 为 `\mi\3`, `5` 为 `\mi\4`, 后面是雾凇中文候选。
+- `nihao` → 第一个候选拟素 `ni-hao`, 后续是普通中文候选「你好」等。
+- `hou` / `mou` 等另有同音不同字素的候选, 保持来源字素可区分。
+
+### 保存格式的分工
+
+| 文件 | 用途 | 保真范围 |
+| --- | --- | --- |
+| `.kamodoc` | **主文稿 / 正式备份** | 完整保存编辑器支持的段落、行内格式和字素/音节源码, 可往返编辑 |
+| `.md` | 分享、转移到现有 `\kamotish{...}` Markdown 流程 | 导出支持的 Markdown 及部分内嵌 HTML 样式; **复杂富文本导入不保证无损** |
+| `.pdf` | 排版完成后阅读、打印 | SVG 采用矢量绘制; PDF 内容不提供编辑器内部源代码 |
+
+「无损」是指 **Kamotish Writer 2 支持的节点和样式** 在 `.kamodoc` 的导出 / 导入往返间保持一致, 不是指任意 Word、Google Docs 或外部 HTML 的完整兼容。`.kamodoc` 是公开结构的 JSON, 可自行分析与批量处理。
+
+## 已合并到 Kamotish 主项目
+
+编辑器位于主仓库的 `writer/`，主项目的 Pages 工作流统一部署页面并构建雾凇词库。入口为主站的 `writer/` 路径。渲染库统一使用 `web/kamotish.js`，不再维护旧版副本。旧文稿中的字素 `\no` 在载入时迁移为 `\nou`，普通拼读音节 `no` 保持原义。
+
+### Markdown 与插图
+
+“打开文稿”可直接导入之前的 `\kamotish{…}` Markdown。标题、引用、列表、链接、表格、代码与图片按 Markdown 解析，不再逐段用正则替换。带本地图片时点击“打开 MD 文件夹”，选择同时包含 `.md` 和图片的文件夹，再选择文稿；主站文档预览也可通过“在文稿编辑器中打开”传递当前文稿与图片。
+
+图片嵌入 `.kamodoc` 中，可离线往返编辑。导出 Markdown 保留图片原相对路径，分享时需带上图片目录。复杂富文本的 MD 往返仍不保证无损，正式备份建议使用 `.kamodoc`。
+
+### 本地运行
+
+在主仓库根目录执行：
+
+```bash
+npm ci --prefix tools/md2pdf
+node tools/md2pdf/server.js
+# 访问 http://127.0.0.1:4747/writer/
+```
+
+本地内置 xpinyin 字表。完整雾凇词库可通过主项目 Pages 工作流构建，或运行 `python3 writer/scripts/build_rime_ice.py --output-dir writer/data`。
+
+### 回归测试
+
+```bash
+node writer/tests/test_ime.cjs
+python3 -m unittest discover -s writer/tests -p 'test_dictionary.py'
+# 有 Chromium、Playwright 和 PyMuPDF 时:
+python3 writer/tests/test_browser.py
+```
+
+浏览器测试使用脚本注入, 避免受受限测试环境对 localhost / file URL 的屏蔽, 不会修改实际网站代码。
+
+### 仍待完善的能力
+
+- 基础富文本仍在浏览器 `contenteditable` / `execCommand` 之上: 对复杂表格、多栏、跨页布局, 还没有 Google Docs 级的稳定性。`.kamodoc` 只保存本版本受支持的内容。
+- SVG 单位可以逐字素或拟素**音节**选中, 不能在单个拟素音节的内部再选择其中的拉丁字符。该粒度与字块排版一致。
+- Rime Ice 提供开源汉字表和带词频词库; 这是自定义 JS 拼音拼接方案, **不是**完整 librime 引擎, 不包含其完整语言模型、模糊音等功能。
+- 文档储存在本浏览器本地, 不提供自动跨设备同步; 请定期导出 `.kamodoc`。
+- PDF 输出仍受浏览器分页和本机字体影响。请用 Chromium 的打印→另存为 PDF 检查重要文档。
+
+## 许可与致谢
+
+- 自编前端/渲染引擎: MIT (LICENSE)。
+- 雾凇拼音 [iDvel/rime-ice](https://github.com/iDvel/rime-ice): GPL-3.0-only (LICENSE-RIME-ICE-GPL-3.0.txt), 部署时下载、编译的生成词库保留此许可。
+- [xpinyin](https://ctan.org/pkg/xpinyin) 的读音备用表: LPPL-1.3c+ (LICENSE-XPINYIN-LPPL.txt)。
+- Kamotish 渲染路径沿用用户提供的 SVG 字形实现。没有包含字体文件。

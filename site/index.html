@@ -11,6 +11,7 @@
 <script src="kamotish.js"></script>
 <script src="markdown-it-kamotish.js"></script>
 <script src="kamotish-markdown.js"></script>
+<script src="kamotish-files.js"></script>
 <style>
 :root { --bg: #f6f4ee; --panel: #fff; --fg: #1d1d1b; --muted: #75716a; --line: #dedad0; --accent: #1e3a48; --accent-fg: #fff;
         --warn: #b3261e; --warn-bg: #fdeeec; --warn-line: #f2c9c4; --ok: #2e7d32; --ok-bg: #e6f2e7; --hover: rgba(128,128,128,.12); --sel: #e2ebef; }
@@ -59,6 +60,7 @@ body.local [data-online-only] { display: none !important; }
 aside { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
 #drop { margin: 12px; padding: 14px; border: 2px dashed var(--line); border-radius: 10px; text-align: center; color: var(--muted); }
 #drop.over { border-color: var(--accent); background: var(--sel); }
+.row[hidden] { display: none; }
 .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 #drop .row { justify-content: center; margin-top: 8px; }
 .side { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
@@ -110,6 +112,7 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
   <nav>
     <button data-tab="doc">文档 → PDF</button>
     <button data-tab="try">试写</button>
+    <a class="b" href="writer/">文稿编辑器</a>
     <button data-tab="dl">下载与说明</button>
   </nav>
 </header>
@@ -121,7 +124,7 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
           <button class="b" id="pickFiles">选择文件</button>
           <button class="b" id="pickDir">选择文件夹</button>
         </div>
-        <input type="file" id="files" accept=".md,.markdown,text/markdown" multiple hidden>
+        <input type="file" id="files" accept=".md,.markdown,text/markdown,image/*" multiple hidden>
         <input type="file" id="dirInput" webkitdirectory hidden>
       </div>
       <div class="side">
@@ -129,7 +132,12 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
         <div class="row">
           <label>纸张 <select id="paper"><option>A4</option><option>A5</option><option>B5</option><option value="Letter">Letter</option></select></label>
           <label>字号 <select id="size"><option>10</option><option selected>11</option><option>12</option><option>14</option></select></label>
-          <label data-local-only><input type="checkbox" id="pagenum" checked> 页码</label>
+          <label><input type="checkbox" id="pagenum" checked> 加入页码</label>
+        </div>
+        <div class="row" id="pageOptions">
+          <label>格式 <select id="pageFormat"><option value="total">1 / 总页数</option><option value="number">1</option><option value="chinese">第 1 页</option></select></label>
+          <label>位置 <select id="pageAlign"><option value="center">底部居中</option><option value="left">底部左侧</option><option value="right">底部右侧</option></select></label>
+          <label>页码字号 <select id="pageSize"><option>8</option><option>9</option><option>10</option><option>12</option></select></label>
         </div>
         <label data-local-only>PDF 存到 <input class="t grow" id="saveTo" placeholder="留空 = 浏览器下载"></label>
       </div>
@@ -143,11 +151,12 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
         <span id="cursorPos"></span>
         <button class="b" id="editBtn" title="打开源码编辑 (左源码、右预览)">编辑</button>
         <button class="b" id="saveBtn" disabled>保存</button>
+        <button class="b" id="writerBtn">在文稿编辑器中打开</button>
         <button class="b primary" id="pdfBtn">导出 PDF</button>
       </div>
       <div id="problems"></div>
       <div id="empty">
-        <p>左边加入 Markdown 文件，这里显示预览。</p>
+        <p>左边加入 Markdown 文件，这里显示预览。含本地图片时，请选择或拖入包含 Markdown 和图片的整个文件夹。</p>
         <p class="small">卡谋语写 <code>\kamotish{…}</code>；数学公式写 <code>$…$</code>、<code>$$…$$</code> 或 <code>```latex</code> 代码块。<br>
         <span data-online-only>文件只在你的浏览器里处理，不会上传。</span></p>
       </div>
@@ -165,7 +174,7 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
         <textarea id="src" spellcheck="false">我叫 ma-tas-jian，他叫 su-kun-liang。
 \mi\wou\3中国人\mou\2
 \lou\3学\xi\2,\kou\hou2\mou\2。</textarea>
-        <p class="small">拼读直接写小写字母，音节之间用 <code>-</code>；字素写 <code>\名字</code>；音调写 <code>\2</code> <code>\3</code> <code>\4</code>；汉字和标点原样保留。完整写法见使用手册。</p>
+        <p class="small">拼读直接写小写字母，音节之间用 <code>-</code>；字素写 <code>\名字</code>（如 <code>\nou</code>）；音调写 <code>\2</code> <code>\3</code> <code>\4</code>；汉字和标点原样保留。完整写法见使用手册。</p>
       </div>
       <div class="card" id="out"></div>
     </div>
@@ -177,9 +186,10 @@ aside { border-right: 1px solid var(--line); background: var(--panel); display: 
         <h3 style="margin-top:0">两个版本</h3>
         <p>本工具有<b>在线版</b>和<b>本地版</b>，是同一个页面：</p>
         <ul>
-          <li><b>在线版</b>：打开网页即可用。导出 PDF 用浏览器的打印功能 (选“存为 PDF”，页码在打印设置里勾选“页眉和页脚”)。
+          <li><b>在线版</b>：打开网页即可用。导出 PDF 用浏览器的打印功能 (选“存为 PDF”，自定义页码建议使用新版 Chrome / Edge，并关闭打印设置中的“页眉和页脚”，避免重复)。
+            选择或拖入整个文件夹可显示相对路径图片。单独选择 Markdown 文件无法读取旁边的图片。
             在 Chrome / Edge 里，修改过的文件可以直接保存回原文件；其他浏览器会下载修改后的文件。</li>
-          <li><b>本地版</b>：在电脑上运行 <code>tools/md2pdf</code>，额外支持：按路径载入整个文件夹、显示文档里的相对路径图片、
+          <li><b>本地版</b>：在电脑上运行 <code>tools/md2pdf</code>，额外支持：按路径载入整个文件夹、
             一键批量导出 PDF (自动页码)、PDF 直接存进指定文件夹、不联网也能用。</li>
         </ul>
       </div>

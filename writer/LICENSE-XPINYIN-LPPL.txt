@@ -1,0 +1,10 @@
+The fallback Hanzi-to-Pinyin reading data is derived from the xpinyin package's
+xpinyin-database.def as distributed by TeX Live 2026:
+
+Copyright (C) 2012-2022 by Qing Lee <sobenlee@gmail.com>
+Original: https://ctan.org/pkg/xpinyin
+License: LaTeX Project Public License 1.3c or later (LPPL-1.3c+)
+License text: https://www.latex-project.org/lppl/lppl-1-3c.txt
+The generated file data/xpinyin-fallback.json is a transformed data extract.
+To rebuild that transformed file from your own copy of xpinyin-database.def,
+run: python3 scripts/build_fallback.py

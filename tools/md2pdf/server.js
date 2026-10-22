@@ -10,7 +10,7 @@ const L = require('./lib');
 
 const PORT = Number(process.argv[2]) || 4747, HOST = '127.0.0.1', ORIGIN = `http://${HOST}:${PORT}`;
 const ROOT = path.join(__dirname, '..', '..'), SITE = path.join(ROOT, 'site'), WEB = path.join(ROOT, 'web');
-const WEB_FILES = ['kamotish.js', 'markdown-it-kamotish.js', 'kamotish-markdown.js', 'demo.html'];
+const WEB_FILES = ['kamotish.js', 'markdown-it-kamotish.js', 'kamotish-markdown.js', 'kamotish-files.js', 'demo.html'];
 const allowedDirs = new Set();                      // folders loaded by path: their files (images) may be served
 const TYPES = { '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.zip': 'application/zip', '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.pdf': 'application/pdf' };
@@ -43,13 +43,20 @@ const safeName = n => (String(n || 'document').replace(/\.md$/i, '').replace(/[\
 function htmlFor(b) {
   const base = b.dir && allowedDirs.has(b.dir) ? ORIGIN + '/fs' + encodeURI(b.dir) + '/' : '';
   return L.toHtml(String(b.md || ''), { title: safeName(b.name), base, katexHref: ORIGIN + '/vendor/katex/katex.min.css',
-    paper: b.paper || 'A4', fontSize: b.fontSize || 11 });
+    paper: b.paper || 'A4', fontSize: b.fontSize || 11, imageSources: b.imageSources, documentPath: b.documentPath, pageNumbers: b.pageNumbers !== false, pageFormat: b.pageFormat, pageAlign: b.pageAlign, pageSize: b.pageSize });
 }
 
 async function handle(req, res) {
   const url = new URL(req.url, ORIGIN), p = decodeURIComponent(url.pathname);
   if (req.method === 'GET' && p === '/api/info') return send(res, 200, { local: true, version: 1 });
   if (req.method === 'GET' && (p === '/' || p === '/index.html')) return serveFile(res, path.join(SITE, 'index.html'));
+  if (p === '/writer') { res.writeHead(302, { Location: '/writer/' }); return res.end(); }
+  if (req.method === 'GET' && p.startsWith('/writer/')) {
+    const writer = path.join(ROOT, 'writer');
+    const f = path.resolve(writer, p.replace(/^\/writer\/?/, '') || 'index.html');
+    if (!inside(f, writer)) return send(res, 403, 'forbidden', 'text/plain');
+    return serveFile(res, f);
+  }
   if (req.method === 'GET' && WEB_FILES.includes(p.slice(1))) return serveFile(res, path.join(WEB, p.slice(1)));
   if (req.method === 'GET' && /^\/kamotish-(chrome|firefox)\.zip$/.test(p)) return serveFile(res, path.join(ROOT, 'dist', p.slice(1)));
   if (req.method === 'GET' && p.startsWith('/vendor/')) {
@@ -87,7 +94,7 @@ async function handle(req, res) {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
     jobs.set(id, htmlFor(b));
     let pdf;
-    try { pdf = await serial(() => L.printPdf(null, { url: ORIGIN + '/job/' + id, paper: b.paper || 'A4', pageNumbers: b.pageNumbers !== false })); }
+    try { pdf = await serial(() => L.printPdf(null, { url: ORIGIN + '/job/' + id, paper: b.paper || 'A4', pageNumbers: false })); }
     finally { jobs.delete(id); }
     if (b.saveTo) {
       const dir = path.resolve(String(b.saveTo));
