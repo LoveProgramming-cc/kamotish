@@ -1,4 +1,12 @@
+<section id="kw-libraryView" class="library-view" aria-label="我的文稿">
+  <div class="library-heading"><div><span class="writer-eyebrow">文稿编辑</span><h2>我的文稿</h2><p>保存在此浏览器中 · 关闭文稿后仍可在这里找回</p></div><div class="library-actions"><button id="kw-libraryFileMenu" class="menuAnchor" data-menu="file" aria-haspopup="menu">导入 <span class="chevron">⌄</span></button><button id="kw-newDocument" class="primary">＋ 新建文稿</button></div></div>
+  <div class="library-filter"><input id="kw-librarySearch" type="search" placeholder="搜索文稿名称" aria-label="搜索文稿"><select id="kw-librarySort" aria-label="排序"><option value="updated">最近修改</option><option value="title">按名称</option></select><span id="kw-libraryCount"></span></div>
+  <div id="kw-libraryStatus" role="status">正在载入文稿…</div>
+  <div id="kw-libraryList" class="library-list"></div>
+</section>
+<div id="kw-documentView" class="writer-document-view" hidden>
 <div class="writer-top">
+  <button id="kw-backToLibrary" class="iconBtn" title="关闭文稿，返回我的文稿" aria-label="返回我的文稿">←</button>
   <button id="kw-sideToggle" class="iconBtn" title="隐藏或显示文稿目录" aria-label="显示/隐藏侧边栏" aria-expanded="true">☰</button>
   <div class="writer-title"><span class="writer-eyebrow">文稿编辑</span><input id="kw-docTitle" aria-label="文稿标题" value="未命名文稿"></div>
   <div class="topActions"><span id="kw-saveStatus">本地自动保存</span><button id="kw-fileMenu" class="menuAnchor" data-menu="file" aria-haspopup="menu" aria-expanded="false">文件 <span class="chevron">⌄</span></button><button id="kw-pdfBtn" class="primary">排版 / PDF</button></div>
@@ -22,7 +30,7 @@
   <span class="separator"></span>
   <button id="kw-undoBtn" aria-label="撤销" title="撤销">↶</button>
   <button id="kw-redoBtn" aria-label="重做" title="重做">↷</button>
-  <button id="kw-insertKamo">插入卡谋语</button>
+  <button id="kw-insertMenu" class="menuAnchor" data-menu="insert" aria-haspopup="menu" aria-expanded="false">插入 <span class="chevron">⌄</span></button>
 </section>
 <div id="kw-layout" class="writer-layout">
   <aside id="kw-sidebar" class="sidebar">
@@ -42,8 +50,9 @@
       <p>在这里写下你的文稿。也可以打开 Markdown 文件，继续编辑已有的文字和插图。</p>
       <p><span class="kamo-token" data-kamo="\mi\wou\3中国人\mou\2"></span></p>
     </article>
-    <div class="footerHint">双指捏合或 Ctrl + 滚轮缩放 · 点击字素更换声调 · ⌘/Ctrl+S 导出原生文稿</div>
+    <div class="footerHint">双指捏合或 Ctrl + 滚轮缩放 · 点击字素更换声调 · ⌘/Ctrl+S 保存到文稿库</div>
   </div>
+</div>
 </div>
 <div id="kw-dropdown" class="dropdown" hidden role="listbox"></div>
 <div id="kw-tonePicker" class="tonePicker" hidden role="dialog" aria-label="字素声调选择"><span class="toneTitle">字素声调</span><div class="toneChoices" id="kw-toneChoices"></div></div>
@@ -52,3 +61,7 @@
 <div id="kw-toast" role="status"></div><input id="kw-fileInput" hidden type="file" accept=".kamodoc,.md,.markdown,.html,.txt,application/json">
 <div id="kw-folderDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-label="选择 Markdown 文档"><h2>选择文档</h2><p>图片将随所选文档一起导入。</p><div id="kw-folderFiles"></div><button id="kw-folderCancel">取消</button></div></div>
 <input id="kw-folderInput" type="file" webkitdirectory hidden>
+<div id="kw-nameDialog" class="modalCover" hidden><form id="kw-nameForm" class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-nameHeading"><h2 id="kw-nameHeading">文稿名称</h2><input id="kw-nameInput" required maxlength="160" aria-label="文稿名称"><div class="modalBtns"><button type="button" id="kw-nameCancel">取消</button><button type="submit" class="primary">确定</button></div></form></div>
+<div id="kw-deleteDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-deleteHeading"><h2 id="kw-deleteHeading">删除文稿？</h2><p id="kw-deleteMessage"></p><div class="modalBtns"><button id="kw-deleteCancel">取消</button><button id="kw-deleteConfirm" class="danger">删除</button></div></div></div>
+<div id="kw-tableDialog" class="modalCover" hidden><form id="kw-tableForm" class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-tableHeading"><h2 id="kw-tableHeading">插入表格</h2><div class="table-dimensions"><label>行数 <input id="kw-tableRows" type="number" min="1" max="30" value="3" required></label><label>列数 <input id="kw-tableColumns" type="number" min="1" max="12" value="3" required></label></div><label class="table-header"><input id="kw-tableHeader" type="checkbox" checked> 第一行为表头</label><div class="modalBtns"><button id="kw-tableCancel" type="button">取消</button><button type="submit" class="primary">插入</button></div></form></div>
+<input id="kw-imageInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" multiple hidden>

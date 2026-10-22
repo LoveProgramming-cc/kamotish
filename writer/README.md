@@ -77,3 +77,11 @@ python3 writer/tests/test_browser.py
 - 雾凇拼音 [iDvel/rime-ice](https://github.com/iDvel/rime-ice): GPL-3.0-only (LICENSE-RIME-ICE-GPL-3.0.txt), 部署时下载、编译的生成词库保留此许可。
 - [xpinyin](https://ctan.org/pkg/xpinyin) 的读音备用表: LPPL-1.3c+ (LICENSE-XPINYIN-LPPL.txt)。
 - Kamotish 渲染路径沿用用户提供的 SVG 字形实现。没有包含字体文件。
+
+## 文稿管理与插入
+
+“我的文稿”管理保存在此浏览器中的多份文稿。可新建、搜索、排序、打开、重命名、创建副本及删除。返回列表会保存并关闭当前文稿；页面刷新后先显示列表，不自动恢复上次打开的正文。旧版缓存只迁移一次，删除后的旧文稿不会再从旧缓存中恢复。
+
+自动保存与 `⌘/Ctrl+S` 使用 IndexedDB，图片随文稿保存。保存失败时编辑器保留当前文稿，下载 `.kamodoc` 可备份。
+
+“插入”菜单提供：本地图片（可多选）、表格（行列数与可选表头）、分隔线、卡谋语。内容在光标处插入，可继续编辑、保存并导出 PDF。新插入图片在 Markdown 导出中内嵌；导入时已有的相对路径图片保留原路径。

@@ -116,7 +116,7 @@ async function main() {
       for (const ref of new Set(refs)) entries.push({ path: 'book/' + ref, name: path.basename(ref), base64: fs.readFileSync(path.resolve(path.dirname(input), decodeURIComponent(ref))).toString('base64') });
       const count = await writer.evaluate(async entries => {
         const files = entries.map(e => ({ path: e.path, file: new File([e.text === undefined ? Uint8Array.from(atob(e.base64), c => c.charCodeAt(0)) : e.text], e.name, { type: e.text === undefined ? 'image/jpeg' : 'text/markdown' }) }));
-        const [d] = await KamotishFiles.readEntries(files); writerInstance.openMarkdown(d);
+        const [d] = await KamotishFiles.readEntries(files); await writerInstance.openMarkdown(d);
         await Promise.all([...document.querySelectorAll('#kw-editor img')].map(img => img.decode()));
         return document.querySelectorAll('#kw-editor img').length;
       }, entries);
@@ -141,6 +141,116 @@ async function main() {
     await page.waitForFunction(()=>getComputedStyle(document.querySelector('#kw-sidebar')).display==='none');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.screenshot({path:'/private/tmp/kamotish-integrated-writer-mobile.png',fullPage:true});
+    // A closed document returns to the library; reloading never auto-opens a cached draft.
+    page.on('dialog', async dialog => {console.log('Browser dialog:',dialog.type());await dialog.accept();});
+    await page.evaluate(()=>writerInstance.closeDocument());
+    console.log('Checking closed-document reload');
+    await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+    await page.waitForSelector('#kw-libraryList');
+    await page.waitForFunction(()=>writerInstance && !document.querySelector('#kw-libraryStatus').textContent.includes('载入'));
+    assert.equal(await page.$eval('#kw-documentView',e=>e.hidden),true);
+    await page.setViewport({width:1440,height:980});
+    await page.click('#kw-newDocument');
+    await page.$eval('#kw-nameInput',e=>e.value='文稿甲');
+    await page.$eval('#kw-nameForm',e=>e.requestSubmit());
+    await page.waitForFunction(()=>document.querySelector('#kw-docTitle').value==='文稿甲'&&!document.querySelector('#kw-documentView').hidden);
+    await page.click('#kw-nativeMode'); await page.click('#kw-editor'); await page.keyboard.type('First document');
+    // Insert a configurable table at the caret.
+    await page.click('#kw-insertMenu');
+    await page.evaluate(()=>[...document.querySelectorAll('#kw-dropdown button')].find(e=>e.textContent.includes('表格')).click());
+    await page.$eval('#kw-tableRows',e=>e.value='2'); await page.$eval('#kw-tableColumns',e=>e.value='3');
+    await page.$eval('#kw-tableForm',e=>e.requestSubmit());
+    assert.equal(await page.$$eval('#kw-editor table tr',e=>e.length),2);
+    assert.equal(await page.$$eval('#kw-editor table th',e=>e.length),3);
+    assert.equal(await page.$$eval('#kw-editor table td',e=>e.length),3);
+    await page.click('#kw-editor th'); await page.keyboard.type('Header');
+    // Insert a real image through the menu/file picker, retaining text and the insertion point.
+    const imageFile=path.join(temporary,'figure.png');fs.writeFileSync(imageFile,Buffer.from(png,'base64'));
+    await page.evaluate(()=>{const editor=document.querySelector('#kw-editor');const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);getSelection().removeAllRanges();getSelection().addRange(range);editor.focus();});
+    await page.click('#kw-insertMenu');const imageChooser=page.waitForFileChooser();
+    await page.evaluate(()=>[...document.querySelectorAll('#kw-dropdown button')].find(e=>e.textContent.startsWith('图片')).click());
+    await (await imageChooser).accept([imageFile]);
+    await page.waitForFunction(()=>document.querySelector('#kw-editor img')?.naturalWidth===1);
+    assert.match(await page.$eval('#kw-editor',e=>e.textContent),/First document/);
+    assert.match(await page.$eval('#kw-editor',e=>e.textContent),/Header/);
+    const firstId=await page.evaluate(()=>writerInstance.exportNative().id);
+    await page.evaluate(()=>writerInstance.save());
+    await page.screenshot({path:'/private/tmp/kamotish-writer-insert.png',fullPage:true});
+    await page.click('#kw-pdfBtn');
+    await page.waitForFunction(()=>document.querySelector('#preview').contentDocument?.querySelector('img')?.naturalWidth===1);
+    assert.equal(await page.evaluate(()=>document.querySelector('#preview').contentDocument.querySelectorAll('table tr').length),2);
+    await page.click('nav [data-tab="writer"]');
+    await page.evaluate(()=>writerInstance.closeDocument());
+    // Multiple independently saved documents.
+    await page.click('#kw-newDocument');await page.$eval('#kw-nameInput',e=>e.value='文稿乙');await page.$eval('#kw-nameForm',e=>e.requestSubmit());
+    await page.waitForFunction(()=>document.querySelector('#kw-docTitle').value==='文稿乙');
+    const secondId=await page.evaluate(()=>writerInstance.exportNative().id);assert.notEqual(firstId,secondId);
+    await page.evaluate(()=>writerInstance.closeDocument());
+    await page.evaluate(id=>writerInstance.openSavedDocument(id),firstId);
+    assert.match(await page.$eval('#kw-editor',e=>e.textContent),/First document/);
+    assert.equal(await page.$$eval('#kw-editor table tr',e=>e.length),2);
+    await page.waitForFunction(()=>document.querySelector('#kw-editor img')?.naturalWidth===1);
+    // A failed write must keep the active document open.
+    await page.evaluate(()=>{window.actualPut=KamotishLibrary.put;KamotishLibrary.put=async()=>{throw Error('simulated storage failure');};const title=document.querySelector('#kw-docTitle');title.value='文稿甲';title.dispatchEvent(new Event('input',{bubbles:true}));});
+    await page.evaluate(()=>writerInstance.closeDocument());assert.equal(await page.evaluate(()=>writerInstance.hasDocument()),true);
+    assert.match(await page.$eval('#kw-saveStatus',e=>e.textContent),/保存失败/);
+    await page.evaluate(()=>{KamotishLibrary.put=window.actualPut;});
+    await page.evaluate(()=>writerInstance.closeDocument());
+    // Rename, search, duplicate and delete through the document manager.
+    await page.click(`[data-document-id="${firstId}"] summary`);
+    await page.evaluate(id=>[...document.querySelector(`[data-document-id="${id}"]`).querySelectorAll('.document-action-menu button')].find(e=>e.textContent==='重命名').click(),firstId);
+    await page.waitForFunction(()=>!document.querySelector('#kw-nameDialog').hidden);
+    await page.$eval('#kw-nameInput',e=>e.value='文稿甲改名');await page.$eval('#kw-nameForm',e=>e.requestSubmit());
+    await page.waitForFunction(()=>document.querySelector('#kw-nameDialog').hidden);
+    await page.type('#kw-librarySearch','甲改名');assert.equal(await page.$$eval('.library-row',e=>e.length),1);
+    await page.$eval('#kw-librarySearch',e=>{e.value='';e.dispatchEvent(new Event('input',{bubbles:true}));});
+    await page.click(`[data-document-id="${firstId}"] summary`);
+    await page.evaluate(id=>[...document.querySelector(`[data-document-id="${id}"]`).querySelectorAll('.document-action-menu button')].find(e=>e.textContent==='创建副本').click(),firstId);
+    await page.waitForFunction(()=>[...document.querySelectorAll('.library-open strong')].some(e=>e.textContent==='文稿甲改名（副本）'));
+    const copyId=await page.evaluate(()=>[...document.querySelectorAll('.library-row')].find(e=>e.querySelector('strong').textContent==='文稿甲改名（副本）').dataset.documentId);
+    await page.click(`[data-document-id="${copyId}"] summary`);
+    await page.evaluate(id=>[...document.querySelector(`[data-document-id="${id}"]`).querySelectorAll('.document-action-menu button')].find(e=>e.textContent==='删除').click(),copyId);
+    await page.click('#kw-deleteConfirm');await page.waitForFunction(id=>!document.querySelector(`[data-document-id="${id}"]`),{},copyId);
+    await page.reload({waitUntil:'domcontentloaded',timeout:30000});await page.waitForSelector('#kw-libraryList');
+    await page.waitForFunction(id=>document.querySelector(`[data-document-id="${id}"]`),{},firstId);
+    assert.equal(await page.$eval('#kw-documentView',e=>e.hidden),true);
+    assert.equal(await page.evaluate(id=>KamotishLibrary.get(id),copyId),undefined);
+    const persisted=await page.evaluate(id=>KamotishLibrary.get(id),firstId);assert.equal(persisted.title,'文稿甲改名');
+    await page.screenshot({path:'/private/tmp/kamotish-writer-library.png',fullPage:true});
+    // Duplicating an edited Markdown import must use its saved edits, not the original source.
+    await page.evaluate(async()=>{
+      await writerInstance.openMarkdown({name:'导入后编辑.md',md:'Original source'});
+      const editor=document.querySelector('#kw-editor');editor.innerHTML='<p>Saved edited content</p>';editor.dispatchEvent(new Event('input',{bubbles:true}));
+      await writerInstance.closeDocument();
+    });
+    const editedId=await page.evaluate(()=>[...document.querySelectorAll('.library-row')].find(e=>e.querySelector('strong').textContent==='导入后编辑').dataset.documentId);
+    await page.click(`[data-document-id="${editedId}"] summary`);
+    await page.evaluate(id=>[...document.querySelector(`[data-document-id="${id}"]`).querySelectorAll('.document-action-menu button')].find(e=>e.textContent==='创建副本').click(),editedId);
+    await page.waitForFunction(()=>[...document.querySelectorAll('.library-open strong')].some(e=>e.textContent==='导入后编辑（副本）'));
+    const editedCopy=await page.evaluate(()=>[...document.querySelectorAll('.library-row')].find(e=>e.querySelector('strong').textContent==='导入后编辑（副本）').dataset.documentId);
+    await page.evaluate(id=>writerInstance.openSavedDocument(id),editedCopy);
+    assert.match(await page.evaluate(()=>writerInstance.exportDocument().md),/Saved edited content/);
+    assert.doesNotMatch(await page.evaluate(()=>writerInstance.exportDocument().md),/Original source/);
+    await page.evaluate(()=>writerInstance.closeDocument());
+    await page.evaluate(async()=>{
+      await writerInstance.openMarkdown({name:'同名文稿.md',md:'First version'});await writerInstance.closeDocument();
+      await writerInstance.openMarkdown({name:'同名文稿.md',md:'Second version'});await writerInstance.closeDocument();
+    });
+    assert.equal(await page.evaluate(()=>docs.filter(d=>d.name==='同名文稿.md').length),2,'Distinct saved documents with the same name must not overwrite each other');
+    // Migrate an existing singleton cache, while still showing the library on startup.
+    const migrationContext=await browser.createBrowserContext();const migrationPage=await migrationContext.newPage();
+    migrationPage.on('pageerror',e=>errors.push(e.message));
+    await migrationPage.evaluateOnNewDocument(doc=>localStorage.setItem('kamotish-writer-v2',JSON.stringify(doc)),{format:'Kamotish Writer',schemaVersion:2,id:'old-cache',title:'旧缓存文稿',content:[{t:'element',tag:'p',children:[{t:'text',v:'保留旧内容'}]}]});
+    await migrationPage.goto(origin+'/#writer',{waitUntil:'domcontentloaded',timeout:15000});
+    await migrationPage.waitForFunction(()=>[...document.querySelectorAll('.library-open strong')].some(e=>e.textContent==='旧缓存文稿'));
+    assert.equal(await migrationPage.$eval('#kw-documentView',e=>e.hidden),true);
+    assert.equal((await migrationPage.evaluate(()=>KamotishLibrary.list())).length,1);
+    await migrationPage.evaluate(()=>KamotishLibrary.remove('old-cache'));
+    await migrationPage.reload({waitUntil:'domcontentloaded'});await migrationPage.waitForFunction(()=>writerInstance);await migrationPage.evaluate(()=>writerInstance.ready);
+    assert.equal((await migrationPage.evaluate(()=>KamotishLibrary.list())).length,0,'Deleted legacy drafts must not be restored again');
+    await migrationContext.close();
+    console.log('PASS: document library, migration, no automatic reopening, new/open/close/rename/search/duplicate/delete, save failure retention, inserted tables/images and PDF persistence.');
+
     assert.deepEqual(errors, []);
     console.log('PASS: print title, three PDF footer formats, local API, page-number toggle, folder images, same-page Writer, file menu import, roundtrip to PDF, native roundtrip, old no migration, direct MD import.');
   } finally {

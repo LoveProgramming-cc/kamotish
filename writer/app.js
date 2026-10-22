@@ -2,6 +2,7 @@
 window.KamotishWriter = { mount(container, options = {}) {
 /* Kamotish Writer v2: selectable SVG units, versioned native document and custom UI. */
 const $ = id => container.querySelector('#kw-' + id);
+let hasDocument=false, loadingDocument=false, revision=0, savedRevision=0, createdAt='', saveQueue=Promise.resolve(), libraryRecords=[], nameAction=null, deleteTarget=null, insertionTarget=null;
 let openedDocument = null, baseline = '', automaticZoom = !localStorage.getItem('kamotish-writer-zoom');
 const editor=$('editor'), ime=$('ime'), layout=$('layout'), workspace=$('workspace');
 const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -58,7 +59,7 @@ function saveSelection(){const s=getSelection();if(insideEditor()&&s.rangeCount)
 function restoreSelection(){editor.focus({preventScroll:true});if(selectionBefore){const s=getSelection();try{s.removeAllRanges();s.addRange(selectionBefore.cloneRange())}catch{editor.focus()}}}
 function selectedUnits(range){if(!range||range.collapsed)return[];return [...editor.querySelectorAll('.kw-unit')].filter(e=>{try{return range.intersectsNode(e)}catch{return false}})}
 function drawSelection(){const s=getSelection(),r=s?.rangeCount?s.getRangeAt(0):null;const all=r&&insideEditor()?selectedUnits(r):[];editor.querySelectorAll('.kw-unit.is-selected').forEach(e=>{if(!all.includes(e))e.classList.remove('is-selected')});all.forEach(e=>e.classList.add('is-selected'));}
-function changed(){refreshOutline();$('saveStatus').textContent='正在编辑';clearTimeout(saveTimer);saveTimer=setTimeout(save,450)}
+function changed(){refreshOutline();if(!hasDocument||loadingDocument)return;revision++;$('saveStatus').textContent='尚未保存';clearTimeout(saveTimer);saveTimer=setTimeout(()=>save(),450)}
 function refreshOutline(){const root=$('outline');root.replaceChildren();editor.querySelectorAll('h1,h2,h3').forEach(h=>{const b=document.createElement('button');b.className=h.tagName.toLowerCase();b.textContent=h.textContent.trim()||'未命名标题';b.onclick=()=>h.scrollIntoView({behavior:'smooth',block:'center'});root.append(b)});$('counter').textContent=editor.textContent.replace(/\s/g,'').length+' 字'}
 function placeFixed(el,rect){el.hidden=false;const w=el.offsetWidth,h=el.offsetHeight;el.style.left=Math.max(8,Math.min(innerWidth-w-9,rect.left))+'px';el.style.top=(rect.bottom+h+10>innerHeight?Math.max(8,rect.top-h-7):rect.bottom+7)+'px'}
 function closeTone(){selectedToneUnit=null;$('tonePicker').hidden=true}
@@ -122,20 +123,23 @@ const menu=$('dropdown');
 function closeDropdown(){menu.hidden=true;dropdownType='';container.querySelectorAll('.menuAnchor[aria-expanded="true"]').forEach(b=>b.setAttribute('aria-expanded','false'))}
 function openMenu(anchor,type){if(!menu.hidden&&dropdownType===type){closeDropdown();return}closeTone();saveSelection();dropdownType=type;container.querySelectorAll('.menuAnchor').forEach(b=>b.setAttribute('aria-expanded',String(b===anchor)));menu.replaceChildren();
  menu.setAttribute('role',type==='file'?'menu':'listbox');
- if(type==='file'){
-   const entries=[['导入',''],['导入单个文件…','Markdown、原生文稿、文本',()=>$('fileInput').click()],['导入文件夹…','Markdown 与本地图片',()=>$('folderInput').click()],['导出',''],['保存文稿…','.kamodoc · 保留格式与插图',saveNative],['导出 Markdown…','.md · 与文档工具互通',exportMd]];
+ if(type==='file'||type==='insert'){
+   menu.setAttribute('role','menu');
+   const entries=type==='insert'
+     ? [['图片…','从本机选择，可多选',chooseImages],['表格…','设置行数、列数与表头',openTableDialog],['分隔线','',()=>insertHtmlAtCaret('<hr><p><br></p>')],['卡谋语…','字素与拟素',openInsert]]
+     : [...(hasDocument?[['文稿',''],['新建文稿…','创建空白文稿',newDocument],['重命名…','修改当前文稿名称',()=>renameDocument(docId)],['关闭文稿','保存后返回文稿列表',closeDocument]]:[]),['导入',''],['导入单个文件…','Markdown、原生文稿、文本',()=>$('fileInput').click()],['导入文件夹…','Markdown 与本地图片',()=>$('folderInput').click()],...(hasDocument?[['保存与导出',''],['立即保存','保存到此浏览器的文稿库',()=>save().then(ok=>{if(ok)notify('已保存到我的文稿');})],['下载原生文稿…','.kamodoc · 保留格式与插图',saveNative],['导出 Markdown…','.md · 与文档工具互通',exportMd]]:[])];
    for(const [label,hint,action] of entries){
      const el=document.createElement(action?'button':'div');
-     if(action){el.className='menuItem fileMenuItem';el.setAttribute('role','menuitem');el.innerHTML='<span>'+safe(label)+'</span><small>'+safe(hint)+'</small>';el.onclick=()=>{closeDropdown();action();};}
+     if(action){el.className='menuItem fileMenuItem';el.setAttribute('role','menuitem');el.innerHTML='<span>'+safe(label)+'</span><small>'+safe(hint)+'</small>';el.onclick=()=>{closeDropdown();try{const result=action();result?.catch?.(e=>notify(e.message));}catch(e){notify(e.message);}};}
      else{el.className='menuHeading';el.textContent=label;}
      menu.append(el);
    }
  }else if(type==='color'){const grid=document.createElement('div');grid.className='swatchGrid';for(const color of ['#252b32','#5f6875','#e34b50','#dc8b2c','#e4c141','#348e6a','#168c9b','#335eae','#7444af','#c3429a','#ffffff','#000000']){const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=color;b.setAttribute('aria-label',color);b.onclick=()=>{applyFormat('foreColor',color);swatchColor=color;container.querySelector('.colorMark').style.borderBottomColor=color;closeDropdown()};grid.append(b)}menu.append(grid)}
  else for(const [val,label] of PRESETS[type]||[]){const b=document.createElement('button');b.className='menuItem';b.setAttribute('role','option');b.dataset.value=val;b.innerHTML=`<span>${safe(label)}</span>`;b.onclick=()=>{if(type==='zoom'){if(val==='fit'){automaticZoom=true;localStorage.removeItem('kamotish-writer-zoom');fitWidth();}else setZoom(Number(val));}else if(type==='block')applyBlock(val);else if(type==='font')applyFont(val);else if(type==='size')applySize(Number(val));closeDropdown()};menu.append(b)}
- placeFixed(menu,anchor.getBoundingClientRect());if(type==='file')menu.querySelector('button')?.focus();}
+ placeFixed(menu,anchor.getBoundingClientRect());if(type==='file'||type==='insert')menu.querySelector('button')?.focus();}
 container.querySelectorAll('[data-menu]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();openMenu(b,b.dataset.menu)}));
-menu.addEventListener('keydown',e=>{const btns=[...menu.querySelectorAll('button')];let index=btns.indexOf(document.activeElement);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();btns[(index+(e.key==='ArrowDown'?1:btns.length-1))%btns.length]?.focus()}else if(e.key==='Escape'){const anchor=container.querySelector('[data-menu="'+dropdownType+'"]');closeDropdown();anchor?.focus();}});
-document.addEventListener('pointerdown',e=>{if(!e.target.closest('#kw-dropdown,.menuAnchor'))closeDropdown();if(!e.target.closest('#kw-tonePicker,.kw-unit'))closeTone()});
+menu.addEventListener('keydown',e=>{const btns=[...menu.querySelectorAll('button')];let index=btns.indexOf(document.activeElement);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();btns[(index+(e.key==='ArrowDown'?1:btns.length-1))%btns.length]?.focus()}else if(e.key==='Escape'){const anchor=container.querySelector('.menuAnchor[aria-expanded="true"]');closeDropdown();anchor?.focus();}});
+document.addEventListener('pointerdown',e=>{container.querySelectorAll('.document-actions[open]').forEach(d=>{if(!d.contains(e.target))d.open=false;});if(!e.target.closest('#kw-dropdown,.menuAnchor'))closeDropdown();if(!e.target.closest('#kw-tonePicker,.kw-unit'))closeTone()});
 function formatKw(command,value,units){for(const u of units){if(command==='bold')u.style.fontWeight=u.style.fontWeight==='bold'?'':'bold';if(command==='italic')u.style.fontStyle=u.style.fontStyle==='italic'?'':'italic';if(command==='underline')u.style.textDecoration=u.style.textDecoration.includes('underline')?'':'underline';if(command==='strikeThrough')u.style.textDecoration=u.style.textDecoration.includes('line-through')?'':'line-through';if(command==='foreColor')u.style.color=value;if(command==='fontName')u.style.fontFamily=value;if(command==='fontSize')u.style.fontSize=value+'px';}}
 function applyFormat(cmd,value){restoreSelection();const s=getSelection(),units=s.rangeCount?selectedUnits(s.getRangeAt(0)):[];document.execCommand(cmd,false,value===undefined?null:value);if(units.length)formatKw(cmd,value,units);changed()}
 function applyBlock(tag){restoreSelection();document.execCommand('formatBlock',false,tag==='blockquote'?'blockquote':tag);changed()}
@@ -154,7 +158,7 @@ $('sideToggle').onclick=()=>{if(matchMedia('(max-width:760px)').matches){const o
 function sourceValue(){const value=$('kamoSource').value.trim();return value.startsWith('\\kamotish{')&&value.endsWith('}')?value.slice('\\kamotish{'.length,-1):value}
 function openInsert(){saveSelection();$('kamoDialog').hidden=false;$('kamoSource').value='\\mi\\wou\\3中国人\\mou\\2';updatePreview();$('kamoSource').focus()}
 function updatePreview(){$('sourcePreview').innerHTML=Kamotish.renderInline(sourceValue())}
-$('insertKamo').onclick=openInsert;$('kamoSource').addEventListener('input',updatePreview);
+$('kamoSource').addEventListener('input',updatePreview);
 $('cancelInsert').onclick=()=>{$('kamoDialog').hidden=true;editor.focus()};
 $('confirmInsert').onclick=()=>{const s=sourceValue();$('kamoDialog').hidden=true;if(s)insertKamo(s)};
 $('kamoDialog').addEventListener('pointerdown',e=>{if(e.target===$('kamoDialog'))$('cancelInsert').click()});
@@ -195,7 +199,7 @@ function serializeInline(root,insideRun=false){let out='',kamo='';const flush=()
  for(const n of root.childNodes){if(n.nodeType===3){if(insideRun)kamo+=n.textContent;else{flush();out+=n.textContent.replace(/([\\*_`\[\]])/g,'\\$1')}continue}if(n.nodeType!==1)continue;
  if(n.classList.contains('kw-unit')){if(!Object.keys(extractStyles(n)).length){kamo+=n.dataset.raw||'';continue}flush();let content='\\kamotish{'+(n.dataset.raw||'')+'}';for(const [field,val] of Object.entries(extractStyles(n))){if(field==='fontWeight'&&val==='bold')content='**'+content+'**';else if(field==='fontStyle'&&val==='italic')content='*'+content+'*';else if(field==='textDecoration'&&val.includes('underline'))content='<u>'+content+'</u>';else content=`<span style="${field.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}:${safe(val)}">${content}</span>`;}out+=content;continue}
  if(n.classList.contains('kamo-run')){flush();out+=serializeInline(n,true);continue}
- flush();let v=serializeInline(n,insideRun);switch(n.tagName){case'IMG':v='!['+(n.alt||'').replace(/[\[\]]/g,'')+'](<'+(n.dataset.originalSrc||n.getAttribute('src')||'').replace(/>/g,'%3E')+'>)';break;case'BR':v='  \n';break;case'B':case'STRONG':v='**'+v+'**';break;case'I':case'EM':v='*'+v+'*';break;case'U':v='<u>'+v+'</u>';break;case'S':case'STRIKE':v='~~'+v+'~~';break;case'A':v='['+v+']('+safe(n.getAttribute('href')||'')+')';break;default:if(Object.keys(extractStyles(n)).length){const css=Object.entries(extractStyles(n)).map(([k,w])=>k.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())+':'+safe(w)).join(';');v='<span style="'+css+'">'+v+'</span>'}}out+=v}
+ flush();let v=serializeInline(n,insideRun);switch(n.tagName){case'IMG':if((n.getAttribute('src')||'').startsWith('data:image/svg+xml')){v='<img src="'+safe(n.getAttribute('src'))+'" alt="'+safe(n.alt||'')+'">';break;}v='!['+(n.alt||'').replace(/[\[\]]/g,'')+'](<'+(n.dataset.originalSrc||n.getAttribute('src')||'').replace(/>/g,'%3E')+'>)';break;case'BR':v='  \n';break;case'B':case'STRONG':v='**'+v+'**';break;case'I':case'EM':v='*'+v+'*';break;case'U':v='<u>'+v+'</u>';break;case'S':case'STRIKE':v='~~'+v+'~~';break;case'A':v='['+v+']('+safe(n.getAttribute('href')||'')+')';break;default:if(Object.keys(extractStyles(n)).length){const css=Object.entries(extractStyles(n)).map(([k,w])=>k.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())+':'+safe(w)).join(';');v='<span style="'+css+'">'+v+'</span>'}}out+=v}
  flush();return out;
 }
 function blockMd(n){
@@ -233,43 +237,195 @@ function importMarkdown(source, {imageSources,documentPath}={}) {
  editor.replaceChildren(...[...dom.body.childNodes].map(nodeToAst).filter(Boolean).map(astToNode));
  changed();
 }
-function openMarkdown(d){openedDocument=d;importMarkdown(d.md,d);$('docTitle').value=d.name.replace(/\.(md|markdown)$/i,'');baseline=JSON.stringify(exportNative().content)+$('docTitle').value;changed();notify('文稿已载入');}
+async function openMarkdown(d){
+ await ready;if(hasDocument&&!(await save()))throw Error('当前文稿尚未保存，未切换文稿');
+ loadingDocument=true;hasDocument=true;deactivate();docId=d.writerId||crypto.randomUUID();createdAt=new Date().toISOString();
+ if(d.writerId){const previous=await KamotishLibrary.get(d.writerId);if(previous)createdAt=previous.createdAt;}
+ openedDocument=d;importMarkdown(d.md,d);$('docTitle').value=d.name.replace(/\.(md|markdown)$/i,'');
+ baseline=JSON.stringify(exportNative().content)+$('docTitle').value;revision=1;savedRevision=0;loadingDocument=false;
+ showDocument();await save(true);notify('文稿已载入');
+}
 $('folderCancel').onclick=()=>{$('folderDialog').hidden=true;};
 $('folderInput').onchange=async e=>{
  try{
    const docs=await window.KamotishFiles.readEntries([...e.target.files].map(file=>({file,path:file.webkitRelativePath||file.name})));
    if(!docs.length)throw Error('文件夹中没有 Markdown 文档');
    const list=$('folderFiles');list.replaceChildren();
-   for(const d of docs){const b=document.createElement('button');b.textContent=decodeURIComponent(d.documentPath);b.onclick=()=>{openMarkdown(d);$('folderDialog').hidden=true;};list.append(b);}
+   for(const d of docs){const b=document.createElement('button');b.textContent=decodeURIComponent(d.documentPath);b.onclick=async()=>{try{await openMarkdown(d);$('folderDialog').hidden=true;}catch(e){notify(e.message);}};list.append(b);}
    $('folderDialog').hidden=false;
  }catch(ex){notify('导入失败: '+ex.message);}finally{e.target.value='';}
 };
-$('fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{if(f.size>60*1024*1024)throw Error('文件过大 (上限 60 MB)');const src=await f.text();if(/\.kamodoc$/i.test(f.name)){openedDocument=null;importNative(JSON.parse(src));}else if(/\.html?$/i.test(f.name)){openedDocument=null;const dom=new DOMParser().parseFromString(src,'text/html');dom.querySelectorAll('script,style,iframe,object,embed').forEach(x=>x.remove());editor.textContent=dom.body.textContent;changed();$('docTitle').value=f.name.replace(/\.[^.]+$/,'');}else{openMarkdown({name:f.name,md:src});}notify('文稿已载入')}catch(ex){notify('导入失败: '+ex.message)}e.target.value=''};
-function save(){try{localStorage.setItem('kamotish-writer-v2',JSON.stringify(exportNative()));$('saveStatus').textContent='已自动保存'}catch(e){$('saveStatus').textContent='保存失败 · 请导出 .kamodoc'}}
+$('fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{
+ if(f.size>60*1024*1024)throw Error('文件过大 (上限 60 MB)');const src=await f.text();
+ if(/\.kamodoc$/i.test(f.name))await openNativeDocument(JSON.parse(src));
+ else if(/\.html?$/i.test(f.name)){const dom=new DOMParser().parseFromString(src,'text/html');dom.querySelectorAll('script,style,iframe,object,embed').forEach(x=>x.remove());await openMarkdown({name:f.name,md:dom.body.textContent});}
+ else await openMarkdown({name:f.name,md:src});
+ }catch(ex){notify('导入失败: '+ex.message);}e.target.value='';};
+async function save(force=false){
+ clearTimeout(saveTimer);if(!hasDocument||loadingDocument||(!force&&revision===savedRevision))return true;
+ const id=docId,version=revision,source=openedDocument?{name:openedDocument.name,md:openedDocument.md,documentPath:openedDocument.documentPath,writerId:id}:null;
+ const record={id,title:$('docTitle').value||'未命名文稿',createdAt,updatedAt:new Date().toISOString(),document:exportNative(),source,baseline};
+ $('saveStatus').textContent='正在保存…';
+ const result=saveQueue.then(()=>KamotishLibrary.put(record));saveQueue=result.catch(()=>{});
+ try{await result;if(hasDocument&&docId===id){savedRevision=Math.max(savedRevision,version);$('saveStatus').textContent=revision===savedRevision?'已保存到此浏览器':'尚未保存';}return true;}
+ catch(e){if(docId===id)$('saveStatus').textContent='保存失败 · 请下载备份';notify('文稿保存失败: '+e.message);return false;}
+}
 function restoreDoc(){try{const raw=localStorage.getItem('kamotish-writer-v2');if(raw){importNative(JSON.parse(raw));return true}}catch(e){console.warn('Native recovery failed:',e)}
  try{const v1=JSON.parse(localStorage.getItem('kamotish-writer-v1'));if(v1&&typeof v1.html==='string'&&typeof v1.title==='string'){const dom=new DOMParser().parseFromString(v1.html,'text/html');dom.querySelectorAll('script,style,iframe,object,embed,form,input,button').forEach(x=>x.remove());dom.querySelectorAll('*').forEach(e=>{for(const a of [...e.attributes])if(/^on/i.test(a.name))e.removeAttribute(a.name)});editor.innerHTML=dom.body.innerHTML;$('docTitle').value=v1.title;upgradeOldTokens();notify('已迁移旧版文稿; 建议导出 .kamodoc 备份');return true}}catch(e){console.warn('v1 recovery failed:',e)}return false}
 editor.addEventListener('input',()=>{stopIme();changed()});$('docTitle').addEventListener('input',changed);
-container.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveNative()}
+container.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save().then(ok=>{if(ok)notify('已保存到我的文稿');})}
  if((e.ctrlKey||e.metaKey)&&['+','=','-','0'].includes(e.key)&&document.activeElement===editor){e.preventDefault();setZoom(e.key==='0'?1:zoom+(e.key==='-'?-.1:.1))}
- if(e.key==='Escape'){if(composing)stopIme();closeTone();closeDropdown();if(!$('kamoDialog').hidden)$('cancelInsert').click()}});
+ if(e.key==='Escape'){if(composing)stopIme();closeTone();closeDropdown();if(!$('kamoDialog').hidden)$('cancelInsert').click();for(const id of ['tableDialog','nameDialog','deleteDialog'])$(id).hidden=true;}});
 try{const savedZoom=localStorage.getItem('kamotish-writer-zoom');if(savedZoom)setZoom(Number(savedZoom));}catch{zoom=1;}
 if(localStorage.getItem('kamotish-writer-sidebar')==='hidden'){layout.classList.add('collapsed');$('sideToggle').setAttribute('aria-expanded','false')}
-restoreDoc();upgradeOldTokens();refreshOutline();save();
-function deactivate(){stopIme();closeTone();closeDropdown();$('kamoDialog').hidden=true;$('folderDialog').hidden=true;}
+function showDocument(){
+ $('libraryView').hidden=true;$('documentView').hidden=false;selectionBefore=null;
+ workspace.scrollTop=0;fitWidth();
+}
+async function refreshLibrary(){
+ libraryRecords=await KamotishLibrary.list();renderLibrary();
+}
+function renderLibrary(){
+ const term=$('librarySearch').value.trim().toLocaleLowerCase();
+ const records=libraryRecords.filter(d=>d.title.toLocaleLowerCase().includes(term));
+ records.sort($('librarySort').value==='title'?(a,b)=>a.title.localeCompare(b.title,'zh'):(a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+ $('libraryCount').textContent=libraryRecords.length+' 份文稿';
+ $('libraryStatus').textContent=records.length?'':term?'没有找到匹配的文稿':'还没有文稿。新建一份，或从文件菜单导入已有文档。';
+ const list=$('libraryList');list.replaceChildren();
+ for(const record of records){
+   const row=document.createElement('div');row.className='library-row';row.dataset.documentId=record.id;
+   const open=document.createElement('button');open.className='library-open';
+   open.innerHTML='<span class="document-symbol" aria-hidden="true">▤</span><span><strong>'+safe(record.title)+'</strong><small>'+safe(new Date(record.updatedAt).toLocaleString('zh-CN'))+' 修改</small></span>';
+   open.onclick=()=>openSavedDocument(record.id).catch(e=>notify(e.message));
+   const more=document.createElement('details');more.className='document-actions';
+   const summary=document.createElement('summary');summary.textContent='⋯';summary.setAttribute('aria-label',record.title+'的操作');more.append(summary);
+   const actions=document.createElement('div');actions.className='document-action-menu';
+   for(const [label,action] of [['重命名',()=>renameDocument(record.id)],['创建副本',()=>duplicateDocument(record.id)],['删除',()=>requestDelete(record)]]){
+     const button=document.createElement('button');button.textContent=label;if(label==='删除')button.className='danger';
+     button.onclick=()=>{more.open=false;try{action()?.catch?.(e=>notify(e.message));}catch(e){notify(e.message);}};actions.append(button);
+   }
+   more.append(actions);row.append(open,more);list.append(row);
+ }
+}
+function askName(heading,value,action){
+ nameAction=action;$('nameHeading').textContent=heading;$('nameInput').value=value;$('nameDialog').hidden=false;
+ $('nameInput').focus();$('nameInput').select();
+}
+$('nameCancel').onclick=()=>{$('nameDialog').hidden=true;nameAction=null;};
+$('nameForm').onsubmit=async e=>{
+ e.preventDefault();const name=$('nameInput').value.trim();if(!name)return;
+ const submit=$('nameForm').querySelector('[type="submit"]');submit.disabled=true;
+ try{await nameAction?.(name);$('nameDialog').hidden=true;nameAction=null;}catch(error){notify(error.message);}finally{submit.disabled=false;}
+};
+function newDocument(){askName('新建文稿','未命名文稿',name=>openNativeDocument({format:'Kamotish Writer',schemaVersion:2,title:name,content:[{t:'element',tag:'p',children:[{t:'element',tag:'br',children:[]}]}]}));}
+async function openNativeDocument(document){
+ await ready;if(hasDocument&&!(await save()))throw Error('当前文稿尚未保存，未切换文稿');
+ // Validate before replacing the current document.
+ if(document?.format!=='Kamotish Writer'||document.schemaVersion!==2||!Array.isArray(document.content)||document.content.length>100000)throw Error('不是支持的 .kamodoc 文稿');
+ loadingDocument=true;hasDocument=true;deactivate();openedDocument=null;baseline='';createdAt=new Date().toISOString();
+ importNative(Object.assign({},document,{id:crypto.randomUUID()}));revision=1;savedRevision=0;loadingDocument=false;showDocument();await save(true);
+}
+async function openSavedDocument(id){
+ await ready;if(hasDocument&&!(await save()))throw Error('当前文稿尚未保存，未切换文稿');
+ const record=await KamotishLibrary.get(id);if(!record)throw Error('这份文稿已不存在');
+ loadingDocument=true;hasDocument=true;deactivate();openedDocument=record.source;baseline=record.baseline||'';createdAt=record.createdAt;
+ importNative(record.document);revision=0;savedRevision=0;loadingDocument=false;$('saveStatus').textContent='已保存到此浏览器';showDocument();
+}
+async function closeDocument(){
+ if(hasDocument){if(!(await save()))return;options.onDocumentClosed?.(exportDocument());}
+ clearTimeout(saveTimer);hasDocument=false;openedDocument=null;selectionBefore=null;deactivate();
+ $('documentView').hidden=true;$('libraryView').hidden=false;editor.replaceChildren();
+ await refreshLibrary();
+}
+async function renameDocument(id){
+ const record=id===docId&&hasDocument?{title:$('docTitle').value}:await KamotishLibrary.get(id);
+ if(!record)throw Error('文稿已不存在');
+ askName('重命名文稿',record.title,async title=>{
+   if(hasDocument&&docId===id){$('docTitle').value=title;changed();await save();}
+   else{const stored=await KamotishLibrary.get(id);const unchanged=stored.source&&stored.baseline===JSON.stringify(stored.document.content)+stored.document.title;stored.title=title;stored.document.title=title;stored.updatedAt=new Date().toISOString();if(stored.source){stored.source.name=title+'.md';stored.baseline=unchanged?JSON.stringify(stored.document.content)+title:'';}await KamotishLibrary.put(stored);}
+   options.onDocumentRenamed?.(id,title);await refreshLibrary();
+ });
+}
+async function duplicateDocument(id){
+ const record=await KamotishLibrary.get(id);if(!record)throw Error('文稿已不存在');
+ const unchanged=record.source&&record.baseline===JSON.stringify(record.document.content)+record.document.title;
+ record.id=crypto.randomUUID();record.title+='（副本）';record.createdAt=record.updatedAt=new Date().toISOString();record.document.id=record.id;record.document.title=record.title;
+ if(record.source){record.source.name=record.title+'.md';record.source.writerId=record.id;record.baseline=unchanged?JSON.stringify(record.document.content)+record.title:'';}
+ await KamotishLibrary.put(record);await refreshLibrary();notify('已创建副本');
+}
+function requestDelete(record){deleteTarget=record.id;$('deleteMessage').textContent='将从此浏览器的文稿库中删除“'+record.title+'”。已下载的文件不会受影响。';$('deleteDialog').hidden=false;$('deleteCancel').focus();}
+$('deleteCancel').onclick=()=>{$('deleteDialog').hidden=true;deleteTarget=null;};
+$('deleteConfirm').onclick=async()=>{
+ if(!deleteTarget)return;try{await KamotishLibrary.remove(deleteTarget);options.onDocumentDeleted?.(deleteTarget);$('deleteDialog').hidden=true;deleteTarget=null;await refreshLibrary();notify('文稿已删除');}catch(e){notify(e.message);}
+};
+$('librarySearch').oninput=renderLibrary;$('librarySort').onchange=renderLibrary;
+$('newDocument').onclick=newDocument;$('backToLibrary').onclick=()=>closeDocument().catch(e=>notify(e.message));
+async function initializeLibrary(){
+ try{
+   if(!(await KamotishLibrary.meta('legacy-migrated'))){
+     loadingDocument=true;
+     if(restoreDoc()){
+       const native=exportNative(),now=new Date().toISOString();
+       await KamotishLibrary.put({id:native.id,title:native.title||'恢复的文稿',createdAt:now,updatedAt:now,document:native,source:null,baseline:''});
+     }
+     await KamotishLibrary.setMeta('legacy-migrated',true);loadingDocument=false;
+   }
+   editor.replaceChildren();hasDocument=false;await refreshLibrary();
+ }catch(e){loadingDocument=false;$('libraryStatus').textContent='无法打开本地文稿库: '+e.message;throw e;}
+}
+function restoreInsertionPoint(){
+ editor.focus({preventScroll:true});const selection=getSelection();
+ if(selectionBefore&&editor.contains(selectionBefore.startContainer)){selection.removeAllRanges();selection.addRange(selectionBefore.cloneRange());}
+ else{const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);selection.removeAllRanges();selection.addRange(range);}
+}
+function insertHtmlAtCaret(html){
+ if(!hasDocument)return;restoreInsertionPoint();
+ if(!document.execCommand('insertHTML',false,html))throw Error('无法在此处插入内容，请将光标放到正文中');
+ saveSelection();changed();
+}
+function openTableDialog(){saveSelection();insertionTarget=docId;$('tableDialog').hidden=false;$('tableRows').focus();}
+$('tableCancel').onclick=()=>{$('tableDialog').hidden=true;editor.focus();};
+$('tableForm').onsubmit=e=>{
+ e.preventDefault();if(!hasDocument||insertionTarget!==docId)return;
+ const rows=Number($('tableRows').value),cols=Number($('tableColumns').value);
+ if(!Number.isInteger(rows)||rows<1||rows>30||!Number.isInteger(cols)||cols<1||cols>12)return;
+ const table=document.createElement('table');
+ for(let r=0;r<rows;r++){const row=table.insertRow();for(let c=0;c<cols;c++){const cell=document.createElement(r===0&&$('tableHeader').checked?'th':'td');cell.append(document.createElement('br'));row.append(cell);}}
+ $('tableDialog').hidden=true;insertHtmlAtCaret(table.outerHTML+'<p><br></p>');
+}
+function chooseImages(){saveSelection();insertionTarget=docId;$('imageInput').click();}
+$('imageInput').onchange=async e=>{
+ const target=insertionTarget,files=[...e.target.files];e.target.value='';
+ try{
+   const images=[];
+   for(const file of files){
+     if(!/^image\//.test(file.type))throw Error('请选择图片文件');
+     const img=document.createElement('img');img.src=await KamotishFiles.imageData(file);img.alt=file.name.replace(/\.[^.]+$/,'');images.push(img.outerHTML);
+   }
+   if(!hasDocument||docId!==target)return notify('当前文稿已切换，已取消插入图片');
+   if(images.length)insertHtmlAtCaret(images.join('')+'<p><br></p>');
+ }catch(error){notify('插入图片失败: '+error.message);}
+};
+
+const ready=initializeLibrary();
+window.addEventListener('pagehide',()=>save());
+window.addEventListener('beforeunload',e=>{if(hasDocument&&revision!==savedRevision){e.preventDefault();e.returnValue='';}});
+function deactivate(){stopIme();closeTone();closeDropdown();$('kamoDialog').hidden=true;$('folderDialog').hidden=true;$('tableDialog').hidden=true;}
 function exportDocument(){
+ if(!hasDocument)return null;
  const name=filename()+'.md',documentPath=openedDocument?.documentPath||'/'+encodeURIComponent(name);
  const unchanged=openedDocument && baseline===JSON.stringify(exportNative().content)+$('docTitle').value;
  const imageSources=Object.assign(Object.create(null),openedDocument?.imageSources);
  for(const img of editor.querySelectorAll('img')){
    const src=img.dataset.originalSrc||img.getAttribute('src');
-   if(src&&img.src.startsWith('data:image/')){
+   if(src&&!/^[a-z][a-z0-9+.-]*:/i.test(src)&&img.src.startsWith('data:image/')){
      const key=new URL(src,new URL(documentPath,'https://kamotish.invalid/')).pathname;
      imageSources[key]=img.src;
    }
  }
- return {name:unchanged?openedDocument.name:name,md:unchanged?openedDocument.md:exportMarkdown(),documentPath,imageSources};
+ return {writerId:docId,name:unchanged?openedDocument.name:name,md:unchanged?openedDocument.md:exportMarkdown(),documentPath,imageSources};
 }
 function fitWidth(){if(automaticZoom&&workspace.clientWidth)setZoom(Math.min(1,(workspace.clientWidth-50)/794),false);}
 window.addEventListener('resize',()=>{if(!container.hidden)fitWidth();});
-return {openMarkdown,exportDocument,exportNative,importNative,exportMarkdown,deactivate,activate(){fitWidth();if(matchMedia('(max-width:760px)').matches)$('sideToggle').setAttribute('aria-expanded',String(layout.classList.contains('outline-open')));}};
+return {ready,openMarkdown,exportDocument,exportNative,importNative,exportMarkdown,deactivate,save,closeDocument,newDocument,openSavedDocument,hasDocument:()=>hasDocument,activate(){if(!hasDocument)refreshLibrary().catch(e=>notify(e.message));fitWidth();if(matchMedia('(max-width:760px)').matches)$('sideToggle').setAttribute('aria-expanded',String(layout.classList.contains('outline-open')));}};
 } };

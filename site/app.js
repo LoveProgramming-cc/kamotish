@@ -246,14 +246,24 @@ function ensureWriter() {
     if (!response.ok) throw new Error('无法载入编辑器');
     $('tab-writer').innerHTML = await response.text();
     writerInstance = window.KamotishWriter.mount($('tab-writer'), {
-      onExport: d => { acceptWriterDocument(d); tab('doc'); }
+      onExport: d => { acceptWriterDocument(d); tab('doc'); },
+      onDocumentClosed: d => acceptWriterDocument(d),
+      onDocumentRenamed: (id,title) => { const d=docs.find(x=>x.writerId===id); if(d){d.name=title+'.md';draw();docbar();} },
+      onDocumentDeleted: id => {
+        for(let i=docs.length-1;i>=0;i--)if(docs[i].writerId===id)docs.splice(i,1);
+        if(current?.writerId===id){current=editorDoc=null;$('work').hidden=true;$('empty').hidden=false;$('docbar').style.display='none';$('problems').style.display='none';}
+        if(writerLinkedDoc?.writerId===id){writerLinkedDoc=null;writerLinkedText=null;}
+        draw();
+      }
     });
+    await writerInstance.ready;
     return writerInstance;
   })();
   return writerReady;
 }
 function acceptWriterDocument(d) {
-  let existing = docs.find(x => x.name === d.name && (x.documentPath || '') === (d.documentPath || ''));
+  if (!d) return;
+  let existing = docs.find(x => d.writerId && x.writerId ? x.writerId === d.writerId : (x.name === d.name && (x.documentPath || '') === (d.documentPath || '')));
   if (existing) { Object.assign(existing, d); existing.status = null; existing.problems = KM.problems(md, existing.md, window.Kamotish); }
   else { existing = Object.assign({ saved: d.md, problems: KM.problems(md, d.md, window.Kamotish) }, d); docs.push(existing); }
   writerLinkedDoc = existing; writerLinkedText = existing.md;
@@ -265,7 +275,7 @@ async function syncCurrentWriter(writer) {
     const selected = current, d = await documentForWriter(selected);
     if (currentTab !== 'writer') return;
     selected.documentPath = d.documentPath || '/' + encodeURIComponent(d.name); d.documentPath = selected.documentPath;
-    writer.openMarkdown(d); writerLinkedDoc = selected; writerLinkedText = selected.md;
+    await writer.openMarkdown(d); selected.writerId=writer.exportNative().id; writerLinkedDoc = selected; writerLinkedText = selected.md;
   }
   writer.activate();
 }

@@ -114,3 +114,52 @@
 .writer-root .menuHeading:not(:first-child) { border-top:1px solid var(--line); margin-top:5px; padding-top:11px; }
 .writer-root .fileMenuItem { flex-direction:column; align-items:flex-start; gap:2px; padding:8px 11px; min-width:226px; }
 .writer-root .fileMenuItem small { color:var(--muted); font-size:11px; }
+
+.writer-root .writer-document-view { display:flex; flex-direction:column; flex:1; min-height:0; }
+.writer-root .library-view { padding:42px max(24px,calc((100% - 1100px)/2)); overflow:auto; flex:1; }
+.writer-root .library-heading { display:flex; justify-content:space-between; align-items:center; gap:24px; margin-bottom:30px; }
+.writer-root .library-heading h2 { font-size:29px; font-weight:600; margin:6px 0; letter-spacing:-.04em; }
+.writer-root .library-heading p { margin:0; font-size:13px; color:var(--muted); }
+.writer-root .library-actions { display:flex; gap:9px; flex-shrink:0; }
+.writer-root .library-actions button { border-color:var(--line); padding:9px 15px; background:var(--panel); }
+.writer-root .library-actions .primary { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); }
+.writer-root .library-filter { display:flex; align-items:center; gap:12px; margin-bottom:15px; }
+.writer-root .library-filter input { width:min(340px,55%); padding:9px 12px; background:var(--panel); border:1px solid var(--line); border-radius:7px; }
+.writer-root .library-filter select { font-size:12px; border:0; background:transparent; padding:5px; }
+.writer-root #kw-libraryCount { margin-left:auto; color:var(--muted); font-size:12px; white-space:nowrap; }
+.writer-root #kw-libraryStatus { color:var(--muted); font-size:14px; line-height:1.8; }
+.writer-root #kw-libraryStatus:not(:empty) { padding:45px 20px; text-align:center; background:var(--panel); border:1px dashed var(--line); border-radius:10px; }
+.writer-root .library-list { border-radius:10px; border:1px solid var(--line); background:var(--panel); }
+.writer-root .library-list:empty { border:0; }
+.writer-root .library-row { display:flex; align-items:center; padding:8px 16px 8px 8px; gap:8px; }
+.writer-root .library-row + .library-row { border-top:1px solid var(--line); }
+.writer-root .library-open { display:flex; align-items:center; gap:17px; text-align:left; flex:1; min-width:0; padding:12px; }
+.writer-root .document-symbol { width:39px; height:46px; border:1px solid var(--line); border-radius:5px; display:grid; place-items:center; background:var(--bg); color:var(--accent); font-size:24px; flex-shrink:0; }
+.writer-root .library-open strong { display:block; font-size:15px; font-weight:500; overflow-wrap:anywhere; }
+.writer-root .library-open small { display:block; font-size:11px; color:var(--muted); margin-top:6px; }
+.writer-root .document-actions { position:relative; }
+.writer-root .document-actions summary { cursor:pointer; list-style:none; font-size:23px; padding:3px 10px; border-radius:6px; }
+.writer-root .document-actions summary::-webkit-details-marker { display:none; }
+.writer-root .document-actions summary:hover { background:var(--hover); }
+.writer-root .document-action-menu { position:absolute; right:0; top:100%; min-width:140px; padding:5px; display:grid; z-index:90; border:1px solid var(--line); border-radius:8px; background:var(--panel); box-shadow:0 8px 24px #0002; }
+.writer-root .document-action-menu button { text-align:left; }
+.writer-root .danger { color:var(--warn); }
+.writer-root .modal input:not([type="checkbox"]) { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:9px; width:100%; color:var(--fg); }
+.writer-root .modal .modalBtns { margin-top:22px; }
+.writer-root .modal button.danger { background:var(--warn); color:#fff; }
+.writer-root .table-dimensions { display:flex; gap:20px; margin:20px 0; }
+.writer-root .table-dimensions label { flex:1; display:flex; align-items:center; gap:10px; white-space:nowrap; }
+.writer-root .table-header { color:var(--muted); font-size:13px; }
+@media (max-width:760px) {
+ .writer-root .library-view { padding:24px 16px; }
+ .writer-root .library-heading { align-items:flex-start; flex-direction:column; gap:18px; }
+ .writer-root .library-heading h2 { font-size:25px; }
+ .writer-root .library-actions { width:100%; }
+ .writer-root .library-actions button { flex:1; }
+ .writer-root .library-filter { flex-wrap:wrap; }
+ .writer-root .library-filter input { width:100%; }
+ .writer-root .library-row { padding-right:8px; }
+ .writer-root .library-open { gap:12px; }
+}
+
+.writer-root .paper td, .writer-root .paper th { min-width:3em; }
