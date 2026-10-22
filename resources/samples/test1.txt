@@ -6,4 +6,4 @@
 
 “\xi\yu\ii 谋”这个汉字保留原样，不改成字素。\chi\1\ku\2\tou\3\kou\4 之类的组合，只是用来检验音调的位置。
 
-你好，\sei\ka\3\pou！今天天气\ou\bi\no\shi\2很好，\zhi\ku\e\te'\1 我们去公园吧。
+你好，\sei\ka\3\pou！今天天气\ou\bi\nou\shi\2很好，\zhi\ku\e\te'\1 我们去公园吧。
