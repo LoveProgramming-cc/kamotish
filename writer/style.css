@@ -163,3 +163,12 @@
 }
 
 .writer-root .paper td, .writer-root .paper th { min-width:3em; }
+
+.writer-root .fontSizeControl { display:flex; border:1px solid var(--line); border-radius:6px; background:var(--panel); flex-shrink:0; }
+.writer-root .tools #kw-fontSize { width:46px; min-width:0; height:29px; border:0; background:transparent; text-align:center; padding:3px; font-size:13px; }
+.writer-root .tools #kw-sizeMenu { min-width:22px; width:22px; height:29px; padding:2px; border:0; justify-content:center; }
+.writer-root .paper.atom-caret { caret-color:transparent; }
+.writer-root #kw-caret { position:fixed; width:2px; background:#1e3a48; pointer-events:none; z-index:140; animation:kw-caret-blink 1s step-end infinite; }
+.writer-root #kw-caret[hidden] { display:none; }
+@keyframes kw-caret-blink { 50% { opacity:0; } }
+@media (prefers-reduced-motion:reduce) { .writer-root #kw-caret { animation:none; } }

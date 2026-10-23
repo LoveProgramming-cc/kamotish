@@ -96,9 +96,9 @@ async function main() {
       return [...units].filter(e=>range.intersectsNode(e)).length;
     });
     assert.equal(selected,2);
-    await writer.click('#kw-fontSize');
+    await writer.click('#kw-sizeMenu');
     await writer.evaluate(()=>[...document.querySelectorAll('#kw-dropdown button')].find(b=>b.dataset.value==='20').click());
-    assert.equal(await writer.$$eval('#kw-editor .kw-unit[style*="20px"]',e=>e.length),2);
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit[style*="20pt"]',e=>e.length),2);
     const native = await writer.evaluate(() => writerInstance.exportNative().content);
     await writer.evaluate(() => writerInstance.importNative(writerInstance.exportNative()));
     assert.deepEqual(await writer.evaluate(() => writerInstance.exportNative().content), native);
@@ -110,6 +110,56 @@ async function main() {
     await writer.evaluate(() => writerInstance.openMarkdown({name:'旧文稿.md' ,md:'\\kamotish{\\no\\3}'}));
     assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>e.dataset.raw),'\\nou\\3');
     assert.equal(await writer.evaluate(() => KamoIME.candidates('nou')[0].value), '\\nou');
+    // Word/Docs-style sizes: points, selected range only, mixed state, custom
+    // values, native typing and vector typing, with native undo/redo.
+    await writer.evaluate(async()=>{
+      await writerInstance.openMarkdown({name:'字号与退格.md',md:'正文ABC\n\n\\kamotish{\\nou\\mi\\nou}'});
+      const e=document.querySelector('#kw-editor');e.focus();
+      const r=document.createRange();r.selectNodeContents(e.querySelector('p'));const s=getSelection();s.removeAllRanges();s.addRange(r);
+    });
+    await writer.waitForFunction(()=>document.querySelector('#kw-fontSize').value==='12');
+    const setSize=async value=>{await writer.click('#kw-fontSize',{clickCount:3});await writer.keyboard.type(String(value));await writer.keyboard.press('Enter');};
+    await setSize(18.5);
+    assert.equal(await writer.$eval('#kw-fontSize',e=>e.value),'18.5');
+    assert.equal(await writer.$eval('#kw-editor p span',e=>getComputedStyle(e).fontSize),'24.6667px');
+    assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>getComputedStyle(e).fontSize),'16px','Formatting must not affect unselected atoms');
+    await writer.evaluate(()=>{const e=document.querySelector('#kw-editor'),r=document.createRange();r.selectNodeContents(e);const s=getSelection();s.removeAllRanges();s.addRange(r);});
+    await writer.waitForFunction(()=>document.querySelector('#kw-fontSize').value===''&&document.querySelector('#kw-fontSize').placeholder==='混合');
+    await setSize(24);
+    assert.equal(await writer.$eval('#kw-fontSize',e=>e.value),'24');
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.every(e=>getComputedStyle(e).fontSize==='32px')),true);
+    assert.equal(await writer.$$eval('#kw-editor p',es=>es.length),2,'Formatting must preserve paragraphs: '+await writer.$eval('#kw-editor',e=>e.innerHTML.replace(/<svg[\s\S]*?<\/svg>/g,'')));
+    await writer.click('#kw-undoBtn');
+    assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>getComputedStyle(e).fontSize),'16px');
+    await writer.click('#kw-redoBtn');
+    assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>getComputedStyle(e).fontSize),'32px');
+    await writer.evaluate(()=>{const e=document.querySelector('#kw-editor'),u=e.querySelectorAll('.kw-unit')[1],r=document.createRange();r.setStartBefore(u);r.collapse(true);e.focus();const s=getSelection();s.removeAllRanges();s.addRange(r);});
+    await writer.waitForFunction(()=>!document.querySelector('#kw-caret').hidden);
+    const caretPosition=await writer.evaluate(()=>{const c=document.querySelector('#kw-caret').getBoundingClientRect(),u=document.querySelector('#kw-editor .kw-unit').getBoundingClientRect();return Math.abs(c.left-u.right)<2&&c.height>20;});
+    assert(caretPosition,'Visible caret must sit between the actual glyphs');
+    await writer.keyboard.press('Backspace');
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.length),2);
+    assert.equal(await writer.$$eval('#kw-editor p',es=>es.length),2,'Deleting an atom must not create a paragraph');
+    assert.equal(await writer.$$eval('#kw-editor br',es=>es.length),0,'Deleting an atom must not insert a line break');
+    await writer.click('#kw-undoBtn');
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.length),3,'Atomic deletion must support undo');
+    await writer.click('#kw-redoBtn');
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.length),2);
+    assert.equal(await writer.$$eval('#kw-editor br',es=>es.length),0,'Redo must not restore the unwanted line break');
+    await writer.click('#kw-undoBtn');
+    await writer.evaluate(()=>{const e=document.querySelector('#kw-editor'),u=e.querySelectorAll('.kw-unit')[1],r=document.createRange();r.setStartBefore(u);r.collapse(true);e.focus();const s=getSelection();s.removeAllRanges();s.addRange(r);});
+    await writer.keyboard.press('Delete');
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.length),2);
+    await setSize(30);
+    await writer.keyboard.type('nou');await writer.keyboard.press('1');
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.some(e=>e.style.fontSize==='30pt')),true,'New vector input must inherit the chosen size');
+    await writer.click('#kw-nativeMode');
+    await setSize(15);
+    await writer.keyboard.type('XYZ');
+    assert.equal(await writer.evaluate(()=>{const w=document.createTreeWalker(document.querySelector('#kw-editor'),NodeFilter.SHOW_TEXT);while(w.nextNode())if(w.currentNode.textContent.includes('XYZ'))return getComputedStyle(w.currentNode.parentElement).fontSize;return null;}),'20px','New ordinary input must inherit the chosen size');
+    await writer.click('#kw-kamoMode');
+    await writer.screenshot({path:'/private/tmp/kamotish-writer-font-size.png',fullPage:true});
+    console.log('PASS: caret between SVG atoms, atomic Backspace/Delete and undo, point sizes, custom and mixed sizes, selection preservation, native/vector typing and formatting undo/redo.');
     // Direct .md file import, including the user's real document when supplied.
     const input = process.env.KAMOTISH_TEST_MD || path.join(temporary, 'direct.md');
     if (!process.env.KAMOTISH_TEST_MD) fs.writeFileSync(input, source);
