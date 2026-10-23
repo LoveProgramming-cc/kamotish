@@ -128,22 +128,20 @@ window.KamoIME = (() => {
     else if(!multi && phonValid(s))phones=s;
     if(multi){ if(phones)add(phon(phones)); }
     else {
-      // Under the user's contract, glyph #1 then phoneme #2 for single-syllable input.
+      // Keep the four grapheme tones together, followed by the phonetic candidate.
       if(namesSet.has(s))add(glyph(s));
-      if(phones)add(phon(phones));
-      // Shortcuts stay consistent: 1 = unmarked glyph, 2 = phonetic block,
-      // 3 = tone 2, 4 = tone 3, 5 = tone 4. Exactly one key to commit any tone.
       if(namesSet.has(s)) for (const tone of ['2', '3', '4'])
         add({type:'glyph', value:'\\'+s+'\\'+tone, label:'字素 · '+s+' · '+({2:'二声',3:'三声',4:'四声'}[tone])});
+      if(phones)add(phon(phones));
       if(s==='hou')add(glyph('hou2'));  // Alternate reading of a distinct grapheme.
       if(s==='mou')add(glyph('mou2'));
     }
     exactChinese(s).forEach(add);
     sentenceCandidates(s).forEach(add);
     // An unfinished syllable can predict words starting with the current pinyin prefix.
-    prefixMatches(s,8).forEach(add);
+    prefixMatches(s,48).forEach(add);
     add({type:'literal',value:raw,label:'原样输入'});
-    return out.slice(0,9);
+    return out.slice(0,64);
   }
   return {init,loadFor,candidates,splitPinyin,phonValid,get status(){return state},get fullDictionary(){return !!index},
     set onupdate(fn){onupdate=fn},get onupdate(){return onupdate},

@@ -19,10 +19,10 @@ ime._testSetShards({
 });
 const cn=s=>ime.candidates(s).map(c=>c.value);
 assert.equal(ime.candidates('mi')[0].type,'glyph');
-assert.equal(ime.candidates('mi')[1].type,'phon');
-assert.equal(ime.candidates('mi')[2].value,'\\mi\\2');
-assert.equal(ime.candidates('mi')[3].value,'\\mi\\3');
-assert.equal(ime.candidates('mi')[4].value,'\\mi\\4');
+assert.equal(ime.candidates('mi')[4].type,'phon');
+assert.equal(ime.candidates('mi')[1].value,'\\mi\\2');
+assert.equal(ime.candidates('mi')[2].value,'\\mi\\3');
+assert.equal(ime.candidates('mi')[3].value,'\\mi\\4');
 assert.equal(ime.candidates('wou')[0].value,'\\wou');
 assert.equal(ime.candidates('hou')[5].value,'\\hou2');
 assert.equal(ime.candidates('nihao')[0].value,'ni-hao');

@@ -37,8 +37,8 @@
     <div class="sideTitle">文稿目录</div><div id="kw-outline" class="outline"></div>
     <div class="sideBottom"><strong>输入模式</strong>
       <div class="switch"><button id="kw-kamoMode" class="active">卡谋语</button><button id="kw-nativeMode">系统中文</button></div>
-      <p>输入字素拼音: 1 为本调字素, 2 为拟素, 3 / 4 / 5 为字素二 / 三 / 四声; 单击已输入字素还能重新选择声调。</p>
-      <p>音节中可按数字直接选择, 空格选择首项; ← / → 保留给光标, ↑ / ↓ 切换候选。</p>
+      <p>输入拼音后，1 / 2 / 3 / 4 对应一 / 二 / 三 / 四声；单击已输入字素也可更换声调。</p>
+      <p>← / → 选择候选，↑ / ↓ 翻页；空格或 Enter 确认当前候选。未输入拼音时，方向键照常移动光标。</p>
       <p id="kw-dictionaryStatus" class="dictStatus" aria-live="polite">加载开源中文词库中…</p>
       <p class="fine">文稿仅保存在浏览器本地。建议定期保存文稿。</p>
     </div>
@@ -56,7 +56,7 @@
 </div>
 <div id="kw-dropdown" class="dropdown" hidden role="listbox"></div>
 <div id="kw-tonePicker" class="tonePicker" hidden role="dialog" aria-label="字素声调选择"><span class="toneTitle">字素声调</span><div class="toneChoices" id="kw-toneChoices"></div></div>
-<div id="kw-ime" class="ime" hidden><div class="imeHead"><span id="kw-composition"></span><span>卡谋语输入法</span></div><div id="kw-candidates" class="candidates"></div><div class="imeFoot">1 字素 · 2 拟素 · 3/4/5 字素声调 · ↑↓ · Enter/空格 · Esc</div></div>
+<div id="kw-ime" class="ime" hidden><div class="imeHead"><span id="kw-composition"></span><span>卡谋语输入法</span></div><div id="kw-candidates" class="candidates"></div><div class="imeFoot">1–4 一至四声 · ←→ 选择 · ↑↓ 翻页 · Enter/空格 确认 · Esc</div></div>
 <div id="kw-kamoDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-modal="true" aria-label="插入卡谋语"><h2>插入卡谋语</h2><p>输入 <code>\kamotish{...}</code> 中的内容, 或粘贴完整的表达式。</p><textarea id="kw-kamoSource" spellcheck="false" rows="3"></textarea><div class="modalPreview" id="kw-sourcePreview"></div><div class="modalBtns"><button id="kw-cancelInsert">取消</button><button id="kw-confirmInsert" class="primary">插入</button></div></div></div>
 <div id="kw-toast" role="status"></div><input id="kw-fileInput" hidden type="file" accept=".kamodoc,.md,.markdown,.html,.txt,application/json">
 <div id="kw-folderDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-label="选择 Markdown 文档"><h2>选择文档</h2><p>图片将随所选文档一起导入。</p><div id="kw-folderFiles"></div><button id="kw-folderCancel">取消</button></div></div>

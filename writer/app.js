@@ -93,24 +93,49 @@ editor.addEventListener('paste',e=>{
   // Restore plain copied formulas as rendered, editable SVG units.
   if(/^\\kamotish\{[^{}]*\}$/.test(plain.trim())){e.preventDefault();insertKamo(plain.trim().slice(10,-1));}
 });
-// Input overlay: the digits are candidate choices. For a glyph 1=unmarked, 2=phoneme,
-// 3/4/5=tones 2/3/4, so one additional keystroke is enough to select any tone.
+// Tone keys commit tones; candidate selection and paging use separate arrow keys.
+const IME_PAGE_SIZE=6;
 function setMode(m){stopIme();mode=m;$('kamoMode').classList.toggle('active',m==='kamo');$('nativeMode').classList.toggle('active',m==='native');notify(m==='kamo'?'卡谋语拼音已开启':'系统中文输入已开启')}
 $('kamoMode').onclick=()=>setMode('kamo');$('nativeMode').onclick=()=>setMode('native');
 KamoIME.onupdate=status=>{$('dictionaryStatus').textContent=status;if(composing)drawIme()};KamoIME.init();
 function stopIme(){composing='';ime.hidden=true;active=0;items=[]}
-function placeIme(){const s=getSelection();const r=s?.rangeCount?s.getRangeAt(0).cloneRange():null;let rect=r?.getBoundingClientRect()||{left:innerWidth/2,top:100,bottom:110};placeFixed(ime,rect)}
+function caretRect(){
+ const selection=getSelection();let range=selection?.rangeCount?selection.getRangeAt(0).cloneRange():selectionBefore?.cloneRange();
+ if(!range||!editor.contains(range.startContainer)){range=document.createRange();range.selectNodeContents(editor);range.collapse(false);}
+ range.collapse(false);let rect=range.getBoundingClientRect();
+ if(rect.height&& (rect.left||rect.top))return rect;
+ // Empty contenteditable blocks can return a zero rectangle. A temporary marker
+ // measures the actual caret, including CSS zoom and the workspace scroll offset.
+ const marker=document.createElement('span');marker.textContent='\u200b';marker.style.cssText='display:inline;pointer-events:none';
+ range.insertNode(marker);rect=marker.getBoundingClientRect();marker.remove();return rect;
+}
+function placeIme(){if(composing)placeFixed(ime,caretRect());}
+workspace.addEventListener('scroll',placeIme,{passive:true});window.addEventListener('resize',placeIme);
 function preview(x){return x.type==='glyph'||x.type==='phon'?Kamotish.renderInline(x.value):safe(x.value)}
-function drawIme(){if(!composing){ime.hidden=true;return}items=KamoIME.candidates(composing);active=Math.min(active,Math.max(0,items.length-1));$('composition').textContent=composing;$('candidates').innerHTML=items.map((c,i)=>`<button data-i="${i}" class="candidate ${i===active?'selected':''}"><span class="index">${i+1}</span><span class="kamoPreview">${preview(c)}</span><span class="caption">${safe(c.label)}</span></button>`).join('');placeIme()}
+function drawIme(){
+ if(!composing){ime.hidden=true;return;}items=KamoIME.candidates(composing);active=Math.min(active,Math.max(0,items.length-1));
+ const page=Math.floor(active/IME_PAGE_SIZE),start=page*IME_PAGE_SIZE;
+ $('composition').textContent=composing;
+ $('candidates').innerHTML=items.slice(start,start+IME_PAGE_SIZE).map((c,j)=>`<button data-i="${start+j}" class="candidate ${start+j===active?'selected':''}"><span class="kamoPreview">${preview(c)}</span><span class="caption">${safe(c.label)}</span></button>`).join('');
+ container.querySelector('.imeFoot').textContent=`1–4 一至四声 · ←→ 选择 · ↑↓ 翻页 · Enter/空格 确认 · ${page+1}/${Math.max(1,Math.ceil(items.length/IME_PAGE_SIZE))} 页 · Esc`;
+ placeIme();
+}
+function chooseTone(tone){
+ const selected=items[active],target=selected&&['glyph','phon'].includes(selected.type)?selected:items.find(c=>['glyph','phon'].includes(c.type));
+ if(!target)return;
+ const value=target.value.replace(/\\[1-4]$/,'')+(tone==='1'?'':'\\'+tone);
+ stopIme();insertKamo(value);editor.focus();
+}
 function choose(i=active){const c=items[i];if(!c)return;stopIme();if(c.type==='glyph'||c.type==='phon')insertKamo(c.value);else insertText(c.value);editor.focus()}
 $('candidates').addEventListener('mousedown',e=>e.preventDefault());$('candidates').addEventListener('click',e=>{const b=e.target.closest('[data-i]');if(b)choose(Number(b.dataset.i))});
 editor.addEventListener('keydown',e=>{if(mode!=='kamo'||e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
  if(composing){
   if(e.key==='Escape'){e.preventDefault();stopIme();return}
   if(e.key==='Backspace'){e.preventDefault();composing=composing.slice(0,-1);drawIme();return}
-  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();active=(active+(e.key==='ArrowDown'?1:items.length-1))%Math.max(1,items.length);drawIme();return}
-  if(/^[1-9]$/.test(e.key)){e.preventDefault();choose(Number(e.key)-1);return}
-  if(e.key===' '||e.key==='Enter'){e.preventDefault();choose(0);return}
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const pages=Math.max(1,Math.ceil(items.length/IME_PAGE_SIZE));const page=Math.max(0,Math.min(pages-1,Math.floor(active/IME_PAGE_SIZE)+(e.key==='ArrowDown'?1:-1)));active=Math.min(items.length-1,page*IME_PAGE_SIZE+active%IME_PAGE_SIZE);drawIme();return}
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();const start=Math.floor(active/IME_PAGE_SIZE)*IME_PAGE_SIZE,count=Math.min(IME_PAGE_SIZE,items.length-start);active=start+(active-start+(e.key==='ArrowRight'?1:count-1))%Math.max(1,count);drawIme();return}
+  if(/^[1-4]$/.test(e.key)){e.preventDefault();chooseTone(e.key);return}
+  if(e.key===' '||e.key==='Enter'){e.preventDefault();choose();return}
   if(/^[a-z']$/i.test(e.key)){e.preventDefault();composing+=e.key.toLowerCase();active=0;drawIme();return}
   if(e.key==='-'){e.preventDefault();composing+="'";active=0;drawIme();return}
   if(e.key.length===1){e.preventDefault();const c=items[0];if(c)choose(0);insertText(e.key);return}

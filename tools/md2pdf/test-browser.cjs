@@ -165,6 +165,23 @@ async function main() {
     await page.$eval('#kw-nameInput',e=>e.value='文稿甲');
     await page.$eval('#kw-nameForm',e=>e.requestSubmit());
     await page.waitForFunction(()=>document.querySelector('#kw-docTitle').value==='文稿甲'&&!document.querySelector('#kw-documentView').hidden);
+    // Empty paragraphs, CSS zoom, tone keys and candidate pages.
+    for(const tone of ['1','2','3','4']){
+      await page.evaluate(()=>{const e=document.querySelector('#kw-editor');e.innerHTML='<p><br></p>';e.focus();const r=document.createRange();r.setStart(e.firstChild,0);r.collapse(true);getSelection().removeAllRanges();getSelection().addRange(r);});
+      await page.keyboard.type('nou');
+      const bounds=await page.evaluate(()=>({popup:document.querySelector('#kw-ime').getBoundingClientRect().toJSON(),caret:document.querySelector('#kw-editor p').getBoundingClientRect().toJSON()}));
+      assert(Math.abs(bounds.popup.x-bounds.caret.x)<10,'IME must align with the empty-paragraph caret');
+      assert(bounds.popup.y>=bounds.caret.y && bounds.popup.y-bounds.caret.bottom<20,'IME must appear just below the caret');
+      await page.keyboard.press(tone);
+      assert.equal(await page.$eval('#kw-editor .kw-unit',e=>e.dataset.raw),'\\nou'+(tone==='1'?'':'\\'+tone));
+    }
+    await page.evaluate(()=>{const e=document.querySelector('#kw-editor');e.innerHTML='<p><br></p>';e.focus();const r=document.createRange();r.setStart(e.firstChild,0);r.collapse(true);getSelection().removeAllRanges();getSelection().addRange(r);KamoIME._testSetShards({n:{nou:Array.from({length:20},(_,i)=>['候选'+i,100-i])}});});
+    await page.keyboard.type('nou');await page.keyboard.press('ArrowRight');
+    assert.equal(await page.$eval('#kw-candidates .selected',e=>Number(e.dataset.i)),1);
+    await page.keyboard.press('ArrowDown');assert.equal(await page.$eval('#kw-candidates .selected',e=>Number(e.dataset.i)),7);
+    await page.keyboard.press('ArrowUp');assert.equal(await page.$eval('#kw-candidates .selected',e=>Number(e.dataset.i)),1);
+    await page.keyboard.press('Space');assert.equal(await page.$eval('#kw-editor .kw-unit',e=>e.dataset.raw),'\\nou\\2');
+    await page.evaluate(()=>{document.querySelector('#kw-editor').innerHTML='<p><br></p>';});
     await page.click('#kw-nativeMode'); await page.click('#kw-editor'); await page.keyboard.type('First document');
     // Insert a configurable table at the caret.
     await page.click('#kw-insertMenu');
