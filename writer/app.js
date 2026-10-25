@@ -1,570 +1,1247 @@
 'use strict';
+/* Kamotish Writer 3: a ProseMirror document editor with Google Docs style menus, toolbar,
+ * shortcuts, find and replace, links, tables and images. Kamotish graphemes and syllables
+ * are atom nodes in the document model; the Kamotish IME inserts them as transactions. */
 window.KamotishWriter = { mount(container, options = {}) {
-/* Kamotish Writer v2: selectable SVG units, versioned native document and custom UI. */
+const M = window.KamotishWriterModel, { schema, Slice, Fragment } = M;
+const { EditorState, TextSelection, NodeSelection, Plugin, PluginKey } = PM.state;
+const { EditorView, Decoration, DecorationSet } = PM.view;
+const { keymap } = PM.keymap;
+const { history, undo, redo, undoDepth, redoDepth, closeHistory } = PM.history;
+const { baseKeymap, toggleMark, chainCommands, exitCode, wrapIn, lift } = PM.commands;
+const { wrapInList, splitListItem, liftListItem, sinkListItem } = PM.schemaList;
+const T = PM.tables;
+const { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule, undoInputRule } = PM.inputrules;
 const $ = id => container.querySelector('#kw-' + id);
-let hasDocument=false, loadingDocument=false, revision=0, savedRevision=0, createdAt='', saveQueue=Promise.resolve(), libraryRecords=[], nameAction=null, deleteTarget=null, insertionTarget=null;
-let openedDocument = null, baseline = '', automaticZoom = !localStorage.getItem('kamotish-writer-zoom');
-const editor=$('editor'), ime=$('ime'), layout=$('layout'), workspace=$('workspace');
-const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const NAMED_TONES=['一声','二声','三声','四声'];
-const GLYPH=/^\\([a-z][a-z']*\d?)(?:\\([1-4]))?/;
-const KNOWN_GLYPHS=new Set(Kamotish.graphemeNames());
-const PRESETS={block:[['p','正文'],['h1','标题 1'],['h2','标题 2'],['h3','标题 3'],['blockquote','引用']],font:[['serif','宋体 / Serif'],['sans-serif','黑体 / Sans'],['monospace','等宽字体']],size:['8','9','10','11','12','14','16','18','20','24','28','36','48','72'].map(x=>[x,x+' pt']),zoom:[.5,.65,.75,.85,1,1.1,1.25,1.5,1.75,2].map(x=>[String(x),Math.round(x*100)+'%']).concat([['fit','适合宽度']])};
-let typingSize=null,applyingSize=false;
-const syntheticBreaks=new WeakSet();
-let mode='kamo', composing='', items=[],active=0,selectionBefore=null,saveTimer,selectedToneUnit=null,zoom=1,dropdownType='',swatchColor='#24313d',docId=crypto.randomUUID?.()||String(Date.now());
-function notify(s){let t=$('toast');t.textContent=s;t.classList.add('show');clearTimeout(t._timer);t._timer=setTimeout(()=>t.classList.remove('show'),2600)}
-function filename(){return ($('docTitle').value||'Kamotish').replace(/[\\/:*?"<>|]/g,'_')}
-function download(name,data,mime){const blob=new Blob([data],{type:mime}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),4000)}
-function normalizedSource(v){ // Repair one known v1 bug: literals with doubled slash before a command.
-  return String(v||'').replace(/\\no(?![a-z'])/g,'\\nou').replace(/\\\\(?=[a-z][a-z']*\d?|[234])/g,'\\');
+const safe = M.safe, nodes = schema.nodes, marks = schema.marks;
+const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent);
+
+let hasDocument = false, loadingDocument = false, revision = 0, savedRevision = 0, createdAt = '', saveQueue = Promise.resolve();
+let libraryRecords = [], nameAction = null, deleteTarget = null, insertionTarget = null, openedDocument = null, baseline = '';
+let automaticZoom = !localStorage.getItem('kamotish-writer-zoom'), zoom = 1, saveTimer, outlineTimer;
+let mode = 'kamo', composing = '', items = [], active = 0, toneTarget = null, dropdownType = '', menuAnchor = null;
+let docId = crypto.randomUUID?.() || String(Date.now()), linkRange = null;
+const workspace = $('workspace'), layout = $('layout'), ime = $('ime'), menu = $('dropdown');
+
+function notify(s) { const t = $('toast'); t.textContent = s; t.classList.add('show'); clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), 2600); }
+function filename() { return ($('docTitle').value || 'Kamotish').replace(/[\\/:*?"<>|]/g, '_'); }
+function download(name, data, mime) { const blob = new Blob([data], { type: mime }), url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); }
+function keyLabel(spec) {
+  return spec.split('-').map(k => k === 'Mod' ? (isMac ? '⌘' : 'Ctrl') : k === 'Shift' ? (isMac ? '⇧' : 'Shift') : k === 'Alt' ? (isMac ? '⌥' : 'Alt') : k.length === 1 ? k.toUpperCase() : k).join(isMac ? '' : '+');
 }
-// A run is editable, but each vector grapheme / syllable is one *individually* selectable atom.
-// Store the exact source spelling on each atom; SVG is purely a view, never serialized as content.
-function unit(raw,kind,name='',tone=''){if(kind==='glyph'){raw=normalizedSource(raw);if(name==='no')name='nou';}const e=document.createElement('span');e.className='kw-unit';e.contentEditable='false';e.dataset.raw=raw;e.dataset.kind=kind;if(name)e.dataset.name=name;if(tone)e.dataset.tone=tone;const display=kind==='separator'?'':kind==='text'?'':kind==='glyph'? '\\'+name+(tone?'\\'+tone:''):raw.replace(/^-/, '');if(kind==='separator'){e.classList.add('kw-hidden');e.textContent='';}else if(kind==='text')e.textContent=raw;else e.innerHTML=Kamotish.renderInline(display);e.setAttribute('aria-label',kind==='glyph'?name+(tone?NAMED_TONES[Number(tone)-1]:'一声'):raw);return e;}
-function makeKamoRun(value,{legacy=false}={}){
-  const source=normalizedSource(value);let out=document.createElement('span');out.className='kamo-run';out.dataset.kamoRun='true';
-  let i=0,plain='',pending='';const flush=()=>{if(plain){out.appendChild(document.createTextNode(plain));plain='';}};
-  while(i<source.length){
-    const rest=source.slice(i),ch=source[i];
-    if(ch==='\\'){
-      const m=GLYPH.exec(rest);
-      if(m&&KNOWN_GLYPHS.has(m[1])){flush();if(pending){out.append(unit(pending,'separator'));pending='';}out.append(unit(m[0],'glyph',m[1],m[2]||''));i+=m[0].length;continue;}
-      plain+=ch;i++;continue;
+
+/* ---------- Commands ---------- */
+// Each toolbar or menu action is its own undo step, as in Docs.
+const run = (command, focus = true) => { const ok = command(view.state, tr => view.dispatch(closeHistory(tr)), view); if (focus) view.focus(); return ok; };
+function selectionRanges(state) { return state.selection.ranges.map(r => [r.$from.pos, r.$to.pos]); }
+function markActive(state, type) {
+  const { empty, $from } = state.selection;
+  if (empty) return !!type.isInSet(state.storedMarks || $from.marks());
+  let found = false, missing = false;
+  for (const [from, to] of selectionRanges(state)) state.doc.nodesBetween(from, to, node => {
+    if (!node.isInline || node.type === nodes.hard_break) return;
+    if (type.isInSet(node.marks)) found = true; else missing = true;
+  });
+  return found && !missing;
+}
+function marksAtSelection(state, type) {
+  const { empty, $from } = state.selection, values = [];
+  if (empty) { values.push(type.isInSet(state.storedMarks || $from.marks()) || null); return values; }
+  for (const [from, to] of selectionRanges(state)) state.doc.nodesBetween(from, to, node => {
+    if (node.isInline && node.type !== nodes.hard_break) values.push(type.isInSet(node.marks) || null);
+  });
+  return values.length ? values : [null];
+}
+// Add (attrs) or remove (null) one mark across the selection; empty selections set typing marks.
+function setMark(type, attrs) {
+  return (state, dispatch) => {
+    const { empty } = state.selection;
+    if (!dispatch) return true;
+    const tr = state.tr;
+    if (empty) {
+      if (attrs) tr.addStoredMark(type.create(attrs)); else tr.removeStoredMark(type);
+    } else for (const [from, to] of selectionRanges(state)) {
+      if (attrs) tr.addMark(from, to, type.create(attrs)); else tr.removeMark(from, to, type);
     }
-    if(ch==='-'){
-      // A single dash is a lexical separator; two dashes render as one literal dash.
-      flush();if(source[i+1]==='-'){if(pending){out.append(unit(pending,'separator'));pending='';}out.append(unit('--','text'));i+=2;continue;}
-      pending+='-';i++;continue;
-    }
-    if(/[a-z]/i.test(ch)){
-      const m=/^[A-Za-z]+/.exec(rest);let end=i+m[0].length,part=m[0],t='';
-      if(!/[A-Z]/.test(part)){const tone=/^\\([1-4])/.exec(source.slice(end));if(tone){t=tone[1];end+=tone[0].length;}}
-      flush();const raw=pending+source.slice(i,end);pending='';
-      // Abbreviations are plain text, as in the native Kamotish renderer.
-      if(/[A-Z]/.test(part)){out.append(unit(raw,'text'));}
-      else {out.append(unit(raw,'phon'));}
-      i=end;continue;
-    }
-    if(pending){flush();out.append(unit(pending,'separator'));pending='';}
-    plain+=ch;i++;
-  }
-  if(pending){flush();out.append(unit(pending,'separator'));}flush();return out;
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
 }
-function sourceOfRun(run){let value='';for(const node of run.childNodes){if(node.nodeType===3)value+=node.textContent;else if(node.nodeType===1){if(node.classList.contains('kw-unit'))value+=node.dataset.raw||'';else if(node.classList.contains('kamo-run'))value+=sourceOfRun(node);else value+=sourceOfRun(node);}}return value;}
-function upgradeOldTokens(parent=editor){parent.querySelectorAll('.kamo-token').forEach(e=>e.replaceWith(makeKamoRun(e.dataset.kamo||'',{legacy:true})));}
-function insertNode(node){restoreSelection();const s=window.getSelection();if(!s.rangeCount){editor.focus();return}const r=s.getRangeAt(0);const insertionSize=typingSize||(r.collapsed?selectionSizes(r)[0]:null);r.deleteContents();if(insertionSize){if(node.nodeType===3){const span=document.createElement('span');span.style.fontSize=insertionSize+'pt';span.append(node);node=span;}else{node.style.fontSize=insertionSize+'pt';node.querySelectorAll('.kw-unit').forEach(u=>u.style.fontSize=insertionSize+'pt');}}r.insertNode(node);r.setStartAfter(node);r.collapse(true);s.removeAllRanges();s.addRange(r);saveSelection();changed();}
-function insertText(s){insertNode(document.createTextNode(s))}
-function insertKamo(src){insertNode(makeKamoRun(src))}
-function insideEditor(){const s=getSelection();return !!s?.anchorNode&&(s.anchorNode===editor||editor.contains(s.anchorNode))}
-function saveSelection(){const s=getSelection();if(insideEditor()&&s.rangeCount)selectionBefore=s.getRangeAt(0).cloneRange()}
-function restoreSelection(){editor.focus({preventScroll:true});if(selectionBefore){const s=getSelection();try{s.removeAllRanges();s.addRange(selectionBefore.cloneRange())}catch{editor.focus()}}}
-function selectedUnits(range){if(!range||range.collapsed)return[];return [...editor.querySelectorAll('.kw-unit')].filter(e=>{try{return range.intersectsNode(e)}catch{return false}})}
-function drawSelection(){const s=getSelection(),r=s?.rangeCount?s.getRangeAt(0):null;const all=r&&insideEditor()?selectedUnits(r):[];editor.querySelectorAll('.kw-unit.is-selected').forEach(e=>{if(!all.includes(e))e.classList.remove('is-selected')});all.forEach(e=>e.classList.add('is-selected'));}
-function changed(){refreshOutline();if(!hasDocument||loadingDocument)return;revision++;$('saveStatus').textContent='尚未保存';clearTimeout(saveTimer);saveTimer=setTimeout(()=>save(),450)}
-function refreshOutline(){const root=$('outline');root.replaceChildren();editor.querySelectorAll('h1,h2,h3').forEach(h=>{const b=document.createElement('button');b.className=h.tagName.toLowerCase();b.textContent=h.textContent.trim()||'未命名标题';b.onclick=()=>h.scrollIntoView({behavior:'smooth',block:'center'});root.append(b)});$('counter').textContent=editor.textContent.replace(/\s/g,'').length+' 字'}
-function placeFixed(el,rect){el.hidden=false;const w=el.offsetWidth,h=el.offsetHeight;el.style.left=Math.max(8,Math.min(innerWidth-w-9,rect.left))+'px';el.style.top=(rect.bottom+h+10>innerHeight?Math.max(8,rect.top-h-7):rect.bottom+7)+'px'}
-function closeTone(){selectedToneUnit=null;$('tonePicker').hidden=true}
-function setTone(e,tone){if(!e?.isConnected||e.dataset.kind!=='glyph')return;const name=e.dataset.name;const n=String(tone);e.dataset.raw='\\'+name+(tone?'\\'+n:'');if(tone)e.dataset.tone=n;else delete e.dataset.tone;e.innerHTML=Kamotish.renderInline(e.dataset.raw);e.setAttribute('aria-label',name+' '+NAMED_TONES[Number(tone||1)-1]);closeTone();changed();}
-function showTone(e){if(e.dataset.kind!=='glyph')return;closeDropdown();selectedToneUnit=e;let target=$('toneChoices');target.replaceChildren();for(let i=1;i<=4;i++){const t=i===1?'':String(i),b=document.createElement('button');b.className=(e.dataset.tone||'')===t?'selected':'';b.type='button';b.innerHTML=`${Kamotish.renderInline('\\'+e.dataset.name+(t?'\\'+t:''))}<small>${NAMED_TONES[i-1]}</small>`;b.onclick=()=>setTone(e,t);target.append(b)}placeFixed($('tonePicker'),e.getBoundingClientRect())}
-// Inline noneditable SVG atoms need an explicit caret at their boundaries.
-// Keep the overlay outside the document so it never enters exports or clipboard data.
-const visualCaret=document.createElement('span');visualCaret.id='kw-caret';visualCaret.hidden=true;visualCaret.setAttribute('aria-hidden','true');container.append(visualCaret);
-function adjacentUnit(range,backward){const node=adjacentLeaf(range,backward);return node?.nodeType===1&&node.matches('.kw-unit')?node:null;}
-function adjacentLeaf(range,backward){
- let node=range.startContainer,offset=range.startOffset;
- if(node.nodeType===3){if(backward?offset>0:offset<node.length)return node;}
- else if(node.childNodes.length&&(backward?offset>0:offset<node.childNodes.length)){
-  node=node.childNodes[backward?offset-1:offset];const result=edge(node);if(result!==undefined)return result;
- }
- while(node!==editor){
-  const sibling=backward?node.previousSibling:node.nextSibling;
-  if(sibling){const found=edge(sibling);if(found===undefined){node=sibling;continue;}return found;}
-  if(node.nodeType===1&&node.matches('p,div,li,td,th,h1,h2,h3,blockquote'))return null;
-  node=node.parentNode;
- }return null;
- function edge(n){
-  if(n.nodeType===3)return n.length?n:undefined;
-  if(n.nodeType!==1)return undefined;
-  if(n.matches('.kw-hidden'))return undefined;
-  if(n.matches('.kw-unit'))return n;
-  if(n.matches('br,img,p,div,li,td,th'))return null;
-  const children=[...n.childNodes];if(backward)children.reverse();
-  for(const child of children){const result=edge(child);if(result!==undefined)return result;}return undefined;
- }
-}
-function drawCaret(){
- visualCaret.hidden=true;editor.classList.remove('atom-caret');
- const s=getSelection();if(!hasDocument||document.activeElement!==editor||!insideEditor()||!s.isCollapsed||!s.rangeCount)return;
- const r=s.getRangeAt(0),before=adjacentUnit(r,true),after=adjacentUnit(r,false),atom=before||after;if(!atom)return;
- const rect=atom.getBoundingClientRect(),bounds=workspace.getBoundingClientRect();
- const height=parseFloat(getComputedStyle(atom).fontSize)*zoom*1.15,x=before?rect.right:rect.left,y=rect.bottom-height;
- if(y+height<bounds.top||y>bounds.bottom||x<bounds.left||x>bounds.right)return;
- visualCaret.style.cssText=`left:${x}px;top:${y}px;height:${height}px`;visualCaret.hidden=false;editor.classList.add('atom-caret');
-}
-editor.addEventListener('blur',()=>{visualCaret.hidden=true;editor.classList.remove('atom-caret');});
-editor.addEventListener('focus',()=>requestAnimationFrame(drawCaret));
-editor.addEventListener('beforeinput',e=>{
- if(e.isComposing||composing||!['deleteContentBackward','deleteContentForward'].includes(e.inputType))return;
- const s=getSelection();if(!insideEditor()||!s.isCollapsed||!s.rangeCount)return;
- const atom=adjacentUnit(s.getRangeAt(0),e.inputType==='deleteContentBackward');if(!atom)return;
- e.preventDefault();const block=atom.closest('p,div,li,td,th,h1,h2,h3')||editor,breaks=new Set(block.querySelectorAll('br'));const r=document.createRange();r.selectNode(atom);s.removeAllRanges();s.addRange(r);
- // Browser delete can treat noneditable SVG as a paragraph boundary. Explicit
- // selection keeps deletion atomic and retains native undo.
- document.execCommand('delete');
- // Chrome appends a caret BR after the remaining noneditable atoms. It renders
- // as a new line; remove only newly created sentinels in a nonempty block.
- if(block.textContent.trim()||block.querySelector('.kw-unit:not(.kw-hidden),img'))block.querySelectorAll('br').forEach(br=>{if(!breaks.has(br)){syntheticBreaks.add(br);br.remove();}});
- saveSelection();changed();syncSize();drawCaret();
-});
-editor.addEventListener('click',e=>{saveSelection();const t=e.target.closest('.kw-unit[data-kind="glyph"]');if(t)showTone(t);else closeTone();});
-document.addEventListener('selectionchange',()=>{if(!composing)saveSelection();drawSelection();syncSize();drawCaret();});
-editor.addEventListener('keyup',saveSelection);editor.addEventListener('mouseup',saveSelection);
-// Browser clipboard usually turns inline SVG into blanks. Export selected vector units as
-// Kamotish source, including partially selected runs. Non-Kamotish selections use native copy.
-function copySourceFromFragment(root){
-  let result='';for(const n of root.childNodes){
-    if(n.nodeType===3){result+=n.textContent;continue}if(n.nodeType!==1)continue;
-    if(n.classList.contains('kamo-run'))result+='\\kamotish{'+sourceOfRun(n)+'}';
-    else if(n.classList.contains('kw-unit'))result+='\\kamotish{'+(n.dataset.raw||'')+'}';
-    else if(n.tagName==='BR')result+='\n';
-    else result+=copySourceFromFragment(n)+(n.matches('p,div,h1,h2,h3,li')?'\n':'');
-  }return result;
-}
-function writeSelectedClipboard(e,shouldCut){const s=getSelection();if(!insideEditor()||!s.rangeCount||s.isCollapsed)return false;
-  const range=s.getRangeAt(0),selected=selectedUnits(range);if(!selected.length)return false;
-  const fragment=range.cloneContents();const value=copySourceFromFragment(fragment);
-  e.preventDefault();e.clipboardData?.setData('text/plain',value);
-  if(shouldCut){range.deleteContents();s.removeAllRanges();s.addRange(range);changed()}
+function toggle(name) { return toggleMark(marks[name]); }
+function clearFormatting(state, dispatch) {
+  if (!dispatch) return true;
+  const tr = state.tr;
+  if (state.selection.empty) tr.setStoredMarks((state.storedMarks || state.selection.$from.marks()).filter(m => !M.FORMAT_MARKS.includes(m.type)));
+  for (const [from, to] of selectionRanges(state)) for (const type of M.FORMAT_MARKS) tr.removeMark(from, to, type);
+  eachTextblock(state, (node, pos) => { if (node.attrs.align || node.attrs.lineHeight) tr.setNodeMarkup(pos, null, Object.assign({}, node.attrs, { align: null, lineHeight: null })); });
+  dispatch(tr);
   return true;
 }
-editor.addEventListener('copy',e=>writeSelectedClipboard(e,false));
-editor.addEventListener('cut',e=>writeSelectedClipboard(e,true));
-editor.addEventListener('paste',e=>{
-  const plain=e.clipboardData?.getData('text/plain')||'';
-  // Restore plain copied formulas as rendered, editable SVG units.
-  if(/^\\kamotish\{[^{}]*\}$/.test(plain.trim())){e.preventDefault();insertKamo(plain.trim().slice(10,-1));}
-});
-// Tone keys commit tones; candidate selection and paging use separate arrow keys.
-const IME_PAGE_SIZE=6;
-function setMode(m){stopIme();mode=m;$('kamoMode').classList.toggle('active',m==='kamo');$('nativeMode').classList.toggle('active',m==='native');notify(m==='kamo'?'卡谋语拼音已开启':'系统中文输入已开启')}
-$('kamoMode').onclick=()=>setMode('kamo');$('nativeMode').onclick=()=>setMode('native');
-KamoIME.onupdate=status=>{$('dictionaryStatus').textContent=status;if(composing)drawIme()};KamoIME.init();
-function stopIme(){composing='';ime.hidden=true;active=0;items=[]}
-function caretRect(){
- const selection=getSelection();let range=selection?.rangeCount?selection.getRangeAt(0).cloneRange():selectionBefore?.cloneRange();
- if(!range||!editor.contains(range.startContainer)){range=document.createRange();range.selectNodeContents(editor);range.collapse(false);}
- range.collapse(false);let rect=range.getBoundingClientRect();
- if(rect.height&& (rect.left||rect.top))return rect;
- // Empty contenteditable blocks can return a zero rectangle. A temporary marker
- // measures the actual caret, including CSS zoom and the workspace scroll offset.
- const marker=document.createElement('span');marker.textContent='\u200b';marker.style.cssText='display:inline;pointer-events:none';
- range.insertNode(marker);rect=marker.getBoundingClientRect();marker.remove();return rect;
+function eachTextblock(state, f) {
+  const seen = new Set();
+  for (const [from, to] of selectionRanges(state)) state.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.isTextblock) { if (!seen.has(pos)) { seen.add(pos); f(node, pos); } return false; }
+  });
 }
-function placeIme(){if(composing)placeFixed(ime,caretRect());}
-workspace.addEventListener('scroll',()=>{placeIme();drawCaret();},{passive:true});window.addEventListener('resize',()=>{placeIme();drawCaret();});
-function preview(x){return x.type==='glyph'||x.type==='phon'?Kamotish.renderInline(x.value):safe(x.value)}
-function drawIme(){
- if(!composing){ime.hidden=true;return;}items=KamoIME.candidates(composing);active=Math.min(active,Math.max(0,items.length-1));
- const page=Math.floor(active/IME_PAGE_SIZE),start=page*IME_PAGE_SIZE;
- $('composition').textContent=composing;
- $('candidates').innerHTML=items.slice(start,start+IME_PAGE_SIZE).map((c,j)=>`<button data-i="${start+j}" class="candidate ${start+j===active?'selected':''}"><span class="kamoPreview">${preview(c)}</span><span class="caption">${safe(c.label)}</span></button>`).join('');
- container.querySelector('.imeFoot').textContent=`1–4 一至四声 · ←→ 选择 · ↑↓ 翻页 · Enter/空格 确认 · ${page+1}/${Math.max(1,Math.ceil(items.length/IME_PAGE_SIZE))} 页 · Esc`;
- placeIme();
+function setBlockAttr(name, value) {
+  return (state, dispatch) => {
+    let applicable = false; const tr = state.tr;
+    eachTextblock(state, (node, pos) => { if (name in node.attrs) { applicable = true; tr.setNodeMarkup(pos, null, Object.assign({}, node.attrs, { [name]: value })); } });
+    if (applicable && dispatch) dispatch(tr);
+    return applicable;
+  };
 }
-function chooseTone(tone){
- const selected=items[active],target=selected&&['glyph','phon'].includes(selected.type)?selected:items.find(c=>['glyph','phon'].includes(c.type));
- if(!target)return;
- const value=target.value.replace(/\\[1-4]$/,'')+(tone==='1'?'':'\\'+tone);
- stopIme();insertKamo(value);editor.focus();
+function setBlockType(type, attrs = {}) {
+  return (state, dispatch) => {
+    const tr = state.tr;
+    for (const [from, to] of selectionRanges(state)) tr.setBlockType(from, to, type, node => {
+      const keep = {}; for (const k of ['align', 'indent', 'lineHeight']) if (type.spec.attrs?.[k] && node.attrs[k] !== undefined) keep[k] = node.attrs[k];
+      return Object.assign(keep, attrs);
+    });
+    if (!tr.docChanged) return false;
+    if (dispatch) dispatch(tr.scrollIntoView());
+    return true;
+  };
 }
-function choose(i=active){const c=items[i];if(!c)return;stopIme();if(c.type==='glyph'||c.type==='phon')insertKamo(c.value);else insertText(c.value);editor.focus()}
-$('candidates').addEventListener('mousedown',e=>e.preventDefault());$('candidates').addEventListener('click',e=>{const b=e.target.closest('[data-i]');if(b)choose(Number(b.dataset.i))});
-editor.addEventListener('keydown',e=>{if(mode!=='kamo'||e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
- if(composing){
-  if(e.key==='Escape'){e.preventDefault();stopIme();return}
-  if(e.key==='Backspace'){e.preventDefault();composing=composing.slice(0,-1);drawIme();return}
-  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const pages=Math.max(1,Math.ceil(items.length/IME_PAGE_SIZE));const page=Math.max(0,Math.min(pages-1,Math.floor(active/IME_PAGE_SIZE)+(e.key==='ArrowDown'?1:-1)));active=Math.min(items.length-1,page*IME_PAGE_SIZE+active%IME_PAGE_SIZE);drawIme();return}
-  if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();const start=Math.floor(active/IME_PAGE_SIZE)*IME_PAGE_SIZE,count=Math.min(IME_PAGE_SIZE,items.length-start);active=start+(active-start+(e.key==='ArrowRight'?1:count-1))%Math.max(1,count);drawIme();return}
-  if(/^[1-4]$/.test(e.key)){e.preventDefault();chooseTone(e.key);return}
-  if(e.key===' '||e.key==='Enter'){e.preventDefault();choose();return}
-  if(/^[a-z']$/i.test(e.key)){e.preventDefault();composing+=e.key.toLowerCase();active=0;drawIme();return}
-  if(e.key==='-'){e.preventDefault();composing+="'";active=0;drawIme();return}
-  if(e.key.length===1){e.preventDefault();const c=items[0];if(c)choose(0);insertText(e.key);return}
-  stopIme();
- }
- if(/^[a-z]$/i.test(e.key)){e.preventDefault();saveSelection();closeTone();closeDropdown();composing=e.key.toLowerCase();drawIme()}
-});
-// Toolbar dropdowns are custom listboxes: no browser-native select controls.
-const menu=$('dropdown');
-function closeDropdown(){menu.hidden=true;dropdownType='';container.querySelectorAll('.menuAnchor[aria-expanded="true"]').forEach(b=>b.setAttribute('aria-expanded','false'))}
-function openMenu(anchor,type){if(!menu.hidden&&dropdownType===type){closeDropdown();return}closeTone();saveSelection();dropdownType=type;container.querySelectorAll('.menuAnchor').forEach(b=>b.setAttribute('aria-expanded',String(b===anchor)));menu.replaceChildren();
- menu.setAttribute('role',type==='file'?'menu':'listbox');
- if(type==='file'||type==='insert'){
-   menu.setAttribute('role','menu');
-   const entries=type==='insert'
-     ? [['图片…','从本机选择，可多选',chooseImages],['表格…','设置行数、列数与表头',openTableDialog],['分隔线','',()=>insertHtmlAtCaret('<hr><p><br></p>')],['卡谋语…','字素与拟素',openInsert]]
-     : [...(hasDocument?[['文稿',''],['新建文稿…','创建空白文稿',newDocument],['重命名…','修改当前文稿名称',()=>renameDocument(docId)],['关闭文稿','保存后返回文稿列表',closeDocument]]:[]),['导入',''],['导入单个文件…','Markdown、原生文稿、文本',()=>$('fileInput').click()],['导入文件夹…','Markdown 与本地图片',()=>$('folderInput').click()],...(hasDocument?[['保存与导出',''],['立即保存','保存到此浏览器的文稿库',()=>save().then(ok=>{if(ok)notify('已保存到我的文稿');})],['下载原生文稿…','.kamodoc · 保留格式与插图',saveNative],['导出 Markdown…','.md · 与文档工具互通',exportMd]]:[])];
-   for(const [label,hint,action] of entries){
-     const el=document.createElement(action?'button':'div');
-     if(action){el.className='menuItem fileMenuItem';el.setAttribute('role','menuitem');el.innerHTML='<span>'+safe(label)+'</span><small>'+safe(hint)+'</small>';el.onclick=()=>{closeDropdown();try{const result=action();result?.catch?.(e=>notify(e.message));}catch(e){notify(e.message);}};}
-     else{el.className='menuHeading';el.textContent=label;}
-     menu.append(el);
-   }
- }else if(type==='color'){const grid=document.createElement('div');grid.className='swatchGrid';for(const color of ['#252b32','#5f6875','#e34b50','#dc8b2c','#e4c141','#348e6a','#168c9b','#335eae','#7444af','#c3429a','#ffffff','#000000']){const b=document.createElement('button');b.className='swatch';b.style.background=color;b.title=color;b.setAttribute('aria-label',color);b.onclick=()=>{applyFormat('foreColor',color);swatchColor=color;container.querySelector('.colorMark').style.borderBottomColor=color;closeDropdown()};grid.append(b)}menu.append(grid)}
- else for(const [val,label] of PRESETS[type]||[]){const b=document.createElement('button');b.className='menuItem';b.setAttribute('role','option');b.dataset.value=val;b.innerHTML=`<span>${safe(label)}</span>`;b.onclick=()=>{if(type==='zoom'){if(val==='fit'){automaticZoom=true;localStorage.removeItem('kamotish-writer-zoom');fitWidth();}else setZoom(Number(val));}else if(type==='block')applyBlock(val);else if(type==='font')applyFont(val);else if(type==='size')applySize(Number(val));closeDropdown()};menu.append(b)}
- placeFixed(menu,anchor.getBoundingClientRect());if(type==='file'||type==='insert')menu.querySelector('button')?.focus();}
-container.querySelectorAll('[data-menu]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();openMenu(b,b.dataset.menu)}));
-menu.addEventListener('keydown',e=>{const btns=[...menu.querySelectorAll('button')];let index=btns.indexOf(document.activeElement);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();btns[(index+(e.key==='ArrowDown'?1:btns.length-1))%btns.length]?.focus()}else if(e.key==='Escape'){const anchor=container.querySelector('.menuAnchor[aria-expanded="true"]');closeDropdown();anchor?.focus();}});
-document.addEventListener('pointerdown',e=>{container.querySelectorAll('.document-actions[open]').forEach(d=>{if(!d.contains(e.target))d.open=false;});if(!e.target.closest('#kw-dropdown,.menuAnchor'))closeDropdown();if(!e.target.closest('#kw-tonePicker,.kw-unit'))closeTone()});
-function formatKw(command,value,units){for(const u of units){if(command==='bold')u.style.fontWeight=u.style.fontWeight==='bold'?'':'bold';if(command==='italic')u.style.fontStyle=u.style.fontStyle==='italic'?'':'italic';if(command==='underline')u.style.textDecoration=u.style.textDecoration.includes('underline')?'':'underline';if(command==='strikeThrough')u.style.textDecoration=u.style.textDecoration.includes('line-through')?'':'line-through';if(command==='foreColor')u.style.color=value;if(command==='fontName')u.style.fontFamily=value;if(command==='fontSize')u.style.fontSize=value+'pt';}}
-function applyFormat(cmd,value){restoreSelection();const s=getSelection(),units=s.rangeCount?selectedUnits(s.getRangeAt(0)):[];document.execCommand(cmd,false,value===undefined?null:value);if(units.length)formatKw(cmd,value,units);changed()}
-function applyBlock(tag){restoreSelection();document.execCommand('formatBlock',false,tag==='blockquote'?'blockquote':tag);changed()}
-function applyFont(font){restoreSelection();applyFormat('fontName',font)}
-// Sizes are points, as in Word and Docs. Existing px styles retain their appearance.
-function sizeAt(node){const el=node?.nodeType===3?node.parentElement:node;return Math.round(parseFloat(getComputedStyle(el||editor).fontSize)*.75*100)/100;}
-function selectionSizes(range){
- if(range.collapsed){const node=adjacentLeaf(range,true)||adjacentLeaf(range,false)||range.startContainer;return [typingSize||sizeAt(node)];}
- const sizes=[];const visit=node=>{
-  if(node.nodeType===1&&node.matches('.kw-hidden,svg'))return;
-  if(node.nodeType===1&&node.matches('.kw-unit')){if(range.intersectsNode(node))sizes.push(sizeAt(node));return;}
-  if(node.nodeType===3){if(!node.textContent.trim()&&[...node.parentNode.children].some(el=>el.matches('p,div,h1,h2,h3,table,ul,ol,blockquote')))return;const part=document.createRange();part.selectNodeContents(node);if(range.compareBoundaryPoints(Range.END_TO_START,part)<0&&range.compareBoundaryPoints(Range.START_TO_END,part)>0&&node.length)sizes.push(sizeAt(node));return;}
-  node.childNodes.forEach(visit);
- };visit(editor);return sizes;
+function inBlockquote(state) { const { $from } = state.selection; for (let d = $from.depth; d > 0; d--) if ($from.node(d).type === nodes.blockquote) return true; return false; }
+function applyBlockStyle(value) {
+  if (value === 'blockquote') return run(inBlockquote(view.state) ? lift : wrapIn(nodes.blockquote));
+  if (value === 'pre') return run(setBlockType(nodes.code_block));
+  if (/^h[1-6]$/.test(value)) return run(setBlockType(nodes.heading, { level: Number(value[1]) }));
+  return run(setBlockType(nodes.paragraph));
 }
-function syncSize(){
- if(document.activeElement===$('fontSize'))return;
- const s=getSelection();if(!insideEditor()||!s.rangeCount)return;
- const sizes=selectionSizes(s.getRangeAt(0)),unique=[...new Set(sizes)];
- $('fontSize').value=unique.length===1?String(unique[0]):'';
- $('fontSize').placeholder=unique.length>1?'混合':'';
+function listAncestor(state) {
+  const { $from } = state.selection;
+  for (let d = $from.depth; d > 0; d--) { const n = $from.node(d); if (n.type === nodes.bullet_list || n.type === nodes.ordered_list) return { node: n, depth: d, pos: $from.before(d) }; }
+  return null;
 }
-function applySize(pt){
- if(applyingSize)return;
- if(!Number.isFinite(pt)||pt<1||pt>400){notify('字号请输入 1–400 之间的数值（磅）');syncSize();return;}
- applyingSize=true;try {
- restoreSelection();const s=getSelection();if(!insideEditor()||!s.rangeCount)return;
- const range=s.getRangeAt(0);
- if(range.collapsed){typingSize=pt;document.execCommand('fontSize',false,'7');}
- else {
-  typingSize=null;
-  // Replace only the selected fragment in one native undo transaction. Never
-  // rewrite other paragraphs or flatten inline styles, tables, or vector units.
-  const fragment=range.cloneContents();
-  const style=node=>{
-   if(node.nodeType===3){if(!node.textContent.trim()&&[...node.parentNode.children].some(el=>el.matches('p,div,h1,h2,h3,table,ul,ol,blockquote'))){node.remove();return;}if(node.length){const span=document.createElement('span');span.style.fontSize=pt+'pt';node.replaceWith(span);span.append(node);}return;}
-   if(node.nodeType!==1)return;
-   if(node.matches('.kw-unit')){node.style.fontSize=pt+'pt';return;}
-   node.style.removeProperty('font-size');if(node.tagName==='FONT')node.removeAttribute('size');
-   [...node.childNodes].forEach(style);
-  };[...fragment.childNodes].forEach(style);
-  const box=document.createElement('div'),start=document.createElement('span'),end=document.createElement('span');
-  start.id='kw-size-start';end.id='kw-size-end';box.append(fragment);
-  // Place bookmarks inside edge paragraphs: inline markers outside block nodes
-  // cause contenteditable to manufacture an extra empty paragraph.
-  function edgeLeaf(root,last){let nodes=[...root.childNodes];if(nodes.some(n=>n.nodeType===1&&n.matches('p,div,h1,h2,h3,table,ul,ol,blockquote')))nodes=nodes.filter(n=>n.nodeType!==3||n.textContent.trim());const node=last?nodes.at(-1):nodes[0];return node?.nodeType===1&&node.childNodes.length&&!node.matches('.kw-unit')?edgeLeaf(node,last):node;}
-  const head=edgeLeaf(box,false),tail=edgeLeaf(box,true);
-  if(head&&tail){head.before(start);tail.after(end);}else box.append(start,end);
-  document.execCommand('insertHTML',false,box.innerHTML);
-  const first=$('size-start'),last=$('size-end');
-  if(first&&last){const selected=document.createRange();selected.setStartAfter(first);selected.setEndBefore(last);s.removeAllRanges();s.addRange(selected);first.remove();last.remove();}
- }
- saveSelection();$('fontSize').value=String(pt);changed();drawSelection();drawCaret();
- }finally{applyingSize=false;}
+function toggleList(type) {
+  return (state, dispatch) => {
+    const list = listAncestor(state);
+    if (list && list.node.type === type) return liftListItem(nodes.list_item)(state, dispatch);
+    if (list) { if (dispatch) dispatch(state.tr.setNodeMarkup(list.pos, type)); return true; }
+    return wrapInList(type)(state, dispatch);
+  };
 }
-$('fontSize').addEventListener('focus',saveSelection);
-$('fontSize').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();applySize(Number(e.target.value));closeDropdown();}else if(e.key==='Escape'){restoreSelection();syncSize();}});
-$('fontSize').addEventListener('change',e=>{if(e.target.value.trim())applySize(Number(e.target.value));});
-editor.addEventListener('pointerdown',()=>{typingSize=null;});
-editor.addEventListener('keydown',e=>{if(!composing&&/^Arrow|^Home$|^End$/.test(e.key))typingSize=null;});
-editor.addEventListener('input',()=>{
- editor.querySelectorAll('br').forEach(br=>{if(syntheticBreaks.has(br))br.remove();});
- // Native IME composition and ordinary typing both inherit the chosen size.
- if(typingSize)editor.querySelectorAll('font[size="7"]').forEach(el=>{el.removeAttribute('size');el.style.fontSize=typingSize+'pt';});
- syncSize();drawCaret();
-});
-container.querySelectorAll('[data-cmd]').forEach(b=>{b.addEventListener('mousedown',e=>e.preventDefault());b.onclick=()=>applyFormat(b.dataset.cmd)});
-$('undoBtn').onclick=()=>{editor.focus();document.execCommand('undo');changed()};$('redoBtn').onclick=()=>{editor.focus();document.execCommand('redo');changed()};
-// Zoom uses CSS layout zoom, not a transform: caret, DOM selection and popup coordinates stay correct.
-function setZoom(z,persist=true){zoom=Math.min(2,Math.max(.5,Math.round(z*100)/100));container.style.setProperty('--doc-zoom',String(zoom));$('zoomLevel').textContent=Math.round(zoom*100)+'%';if(persist){automaticZoom=false;localStorage.setItem('kamotish-writer-zoom',String(zoom));}requestAnimationFrame(()=>{drawCaret();placeIme();});}
-$('zoomOut').onclick=()=>setZoom(zoom-.1);$('zoomIn').onclick=()=>setZoom(zoom+.1);
-workspace.addEventListener('wheel',e=>{if(e.ctrlKey){e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*.01))}},{passive:false});
-// Safari sends proprietary gesture events on some trackpads.
-let gestureBase=1;workspace.addEventListener('gesturestart',e=>{e.preventDefault();gestureBase=zoom},{passive:false});workspace.addEventListener('gesturechange',e=>{e.preventDefault();setZoom(gestureBase*e.scale)},{passive:false});workspace.addEventListener('gestureend',e=>e.preventDefault(),{passive:false});
-$('sideToggle').onclick=()=>{if(matchMedia('(max-width:760px)').matches){const opened=layout.classList.toggle('outline-open');layout.classList.remove('collapsed');$('sideToggle').setAttribute('aria-expanded',String(opened));return;}const collapsed=layout.classList.toggle('collapsed');$('sideToggle').setAttribute('aria-expanded',String(!collapsed));localStorage.setItem('kamotish-writer-sidebar',collapsed?'hidden':'visible')};
-// Insert dialog with live SVG preview, no window.prompt().
-function sourceValue(){const value=$('kamoSource').value.trim();return value.startsWith('\\kamotish{')&&value.endsWith('}')?value.slice('\\kamotish{'.length,-1):value}
-function openInsert(){saveSelection();$('kamoDialog').hidden=false;$('kamoSource').value='\\mi\\wou\\3中国人\\mou\\2';updatePreview();$('kamoSource').focus()}
-function updatePreview(){$('sourcePreview').innerHTML=Kamotish.renderInline(sourceValue())}
-$('kamoSource').addEventListener('input',updatePreview);
-$('cancelInsert').onclick=()=>{$('kamoDialog').hidden=true;editor.focus()};
-$('confirmInsert').onclick=()=>{const s=sourceValue();$('kamoDialog').hidden=true;if(s)insertKamo(s)};
-$('kamoDialog').addEventListener('pointerdown',e=>{if(e.target===$('kamoDialog'))$('cancelInsert').click()});
-// Lossless roundtrip for supported editor markup; preserve *source*, not thousands of SVG path nodes.
-// The schema is versioned; all user-visible formatting and vector tokens are represented as JSON data.
-const BLOCK_TAGS=new Set(['P','DIV','H1','H2','H3','H4','H5','H6','BLOCKQUOTE','UL','OL','LI','BR','STRONG','B','EM','I','U','S','STRIKE','SPAN','FONT','A','SUP','SUB','CODE','PRE','HR','TABLE','THEAD','TBODY','TR','TH','TD']);
-const STYLE_FIELDS=['color','backgroundColor','fontFamily','fontSize','fontWeight','fontStyle','textDecoration','textAlign','lineHeight','letterSpacing','textIndent'];
-function safeLink(value, image=false){
- const s=String(value||'').trim();
- const scheme=s.replace(/[\u0000-\u0020]/g,'');
- if (/^(?:https?:|mailto:)/i.test(scheme) || !/^[a-z][a-z0-9+.-]*:/i.test(scheme)) return s;
- if (image && /^data:image\/(?:png|jpeg|gif|webp|svg\+xml|avif|bmp|x-icon)[;,]/i.test(s)) return s;
- return '';
+function changeIndent(delta) {
+  return (state, dispatch) => {
+    if (listAncestor(state)) return (delta > 0 ? sinkListItem : liftListItem)(nodes.list_item)(state, dispatch);
+    let applicable = false; const tr = state.tr;
+    eachTextblock(state, (node, pos) => {
+      if (!('indent' in node.attrs)) return;
+      const indent = Math.max(0, Math.min(8, (node.attrs.indent || 0) + delta));
+      if (indent !== node.attrs.indent) { applicable = true; tr.setNodeMarkup(pos, null, Object.assign({}, node.attrs, { indent })); }
+    });
+    if (applicable && dispatch) dispatch(tr);
+    return applicable;
+  };
 }
-function nodeToAst(n){if(n.nodeType===3)return {t:'text',v:n.textContent};if(n.nodeType!==1)return null;
- if(n.tagName==='IMG')return {t:'image',src:safeLink(n.getAttribute('src'),true),originalSrc:n.dataset.originalSrc||'',alt:n.getAttribute('alt')||'',title:n.getAttribute('title')||''};
- if(n.classList.contains('kw-unit'))return {t:'unit',raw:n.dataset.raw||'',kind:n.dataset.kind||'phon',name:n.dataset.name||'',tone:n.dataset.tone||'',style:extractStyles(n)};
- if(n.classList.contains('kamo-run'))return {t:'run',style:extractStyles(n),children:[...n.childNodes].map(nodeToAst).filter(Boolean)};
- if(!BLOCK_TAGS.has(n.tagName))return {t:'element',tag:'span',children:[...n.childNodes].map(nodeToAst).filter(Boolean)};
- let tag=n.tagName.toLowerCase(),style=extractStyles(n);if(tag==='font'){tag='span';if(n.color)style.color=n.color;if(n.face)style.fontFamily=n.face;}
- const result={t:'element',tag,children:[...n.childNodes].map(nodeToAst).filter(Boolean)};
- if(Object.keys(style).length)result.style=style;
- if(n.tagName==='A')result.href=safeLink(n.getAttribute('href'));
- if(n.tagName==='TD'||n.tagName==='TH'){result.colspan=n.colSpan;result.rowspan=n.rowSpan;}
- return result;
+// Home/End and ⌘←/⌘→ by visual line. Chrome stops these at noneditable inline atoms.
+function lineEdge(dir, extend) {
+  return (state, dispatch, view) => {
+    const { head, anchor } = state.selection, $head = state.doc.resolve(head);
+    if (!$head.parent.isTextblock) return false;
+    let caret; try { caret = view.coordsAtPos(head, dir < 0 ? 1 : -1); } catch { return false; }
+    const block = view.nodeDOM($head.before()); if (!block?.getBoundingClientRect) return false;
+    const box = block.getBoundingClientRect(), y = (caret.top + caret.bottom) / 2;
+    const hit = view.posAtCoords({ left: dir < 0 ? box.left + 1 : box.right - 1, top: y }); if (!hit) return false;
+    const pos = Math.max($head.start(), Math.min($head.end(), hit.pos));
+    if (dispatch) dispatch(state.tr.setSelection(TextSelection.create(state.doc, extend ? anchor : pos, pos)).scrollIntoView());
+    return true;
+  };
 }
-function extractStyles(e){const result={};for(const key of STYLE_FIELDS)if(e.style?.[key])result[key]=e.style[key];return result}
-function applySafeStyles(e,style){if(!style||typeof style!=='object')return;for(const key of STYLE_FIELDS){const v=style[key];if(typeof v==='string'&&v.length<180&&!/expression\s*\(|url\s*\(/i.test(v))e.style[key]=v}}
-function astToNode(n){if(!n||typeof n!=='object')return document.createTextNode('');if(n.t==='text')return document.createTextNode(String(n.v||''));if(n.t==='image'){const e=document.createElement('img');e.src=safeLink(n.src,true);e.alt=String(n.alt||'');e.title=String(n.title||'');if(n.originalSrc)e.dataset.originalSrc=safeLink(n.originalSrc,true);return e;}if(n.t==='unit'){const kind=['phon','glyph','separator','text'].includes(n.kind)?n.kind:'text';const e=unit(String(n.raw||''),kind,String(n.name||''),String(n.tone||''));applySafeStyles(e,n.style);return e}
- if(n.t==='run'){const e=document.createElement('span');e.className='kamo-run';e.dataset.kamoRun='true';applySafeStyles(e,n.style);for(const x of (Array.isArray(n.children)?n.children:[]))e.append(astToNode(x));return e}
- let tag=String(n.tag||'span').toUpperCase();if(!BLOCK_TAGS.has(tag)||tag==='FONT')tag='SPAN';const e=document.createElement(tag);applySafeStyles(e,n.style);if(tag==='A')e.href=safeLink(n.href);if(tag==='TD'||tag==='TH'){e.colSpan=Math.max(1,Math.min(100,Number(n.colspan)||1));e.rowSpan=Math.max(1,Math.min(100,Number(n.rowspan)||1));}for(const x of (Array.isArray(n.children)?n.children:[]))e.append(astToNode(x));return e;
+// Arrow keys treat a Kamotish atom like one character (ProseMirror would select it first).
+function moveOverAtom(dir, extend) {
+  return (state, dispatch) => {
+    const sel = state.selection;
+    if (sel instanceof NodeSelection) {
+      if (sel.node.type !== nodes.kamo && sel.node.type !== nodes.math_inline) return false;
+      const pos = dir < 0 ? sel.from : sel.to;
+      if (dispatch) dispatch(state.tr.setSelection(extend ? TextSelection.create(state.doc, dir < 0 ? sel.to : sel.from, pos) : TextSelection.create(state.doc, pos)).scrollIntoView());
+      return true;
+    }
+    if (!(sel instanceof TextSelection) || (!extend && !sel.empty)) return false;
+    let head = sel.head, node = dir < 0 ? sel.$head.nodeBefore : sel.$head.nodeAfter;
+    if (node?.type !== nodes.kamo && node?.type !== nodes.math_inline) return false;
+    do { head += dir * node.nodeSize; const $h = state.doc.resolve(head); node = dir < 0 ? $h.nodeBefore : $h.nodeAfter; }
+    while (node?.type === nodes.kamo && node.attrs.kind === 'separator');
+    if (dispatch) dispatch(state.tr.setSelection(TextSelection.create(state.doc, extend ? sel.anchor : head, head)).scrollIntoView());
+    return true;
+  };
 }
-function exportNative(){return {format:'Kamotish Writer',schemaVersion:2,id:docId,title:$('docTitle').value,createdBy:'Kamotish Writer 2',savedAt:new Date().toISOString(),page:{size:'A4'},content:[...editor.childNodes].map(nodeToAst).filter(Boolean)}}
-function importNative(doc){if(doc?.format!=='Kamotish Writer'||doc.schemaVersion!==2||!Array.isArray(doc.content))throw Error('不是支持的 .kamodoc 文档 (需要版本 2)');if(doc.content.length>100000)throw Error('文档节点数量异常');editor.replaceChildren(...doc.content.map(astToNode));$('docTitle').value=String(doc.title||'未命名文稿');docId=String(doc.id||docId);changed()}
-function saveNative(){download(filename()+'.kamodoc',JSON.stringify(exportNative(),null,2),'application/vnd.kamotish-writer+json;charset=utf-8');notify('原生 .kamodoc 文稿已导出');}
-// Markdown intentionally has fewer features than .kamodoc; custom marks are expressed as inline HTML where supported.
-function serializeInline(root,insideRun=false){let out='',kamo='';const flush=()=>{if(kamo){out+='\\kamotish{'+kamo+'}';kamo=''}};
- for(const n of root.childNodes){if(n.nodeType===3){if(insideRun)kamo+=n.textContent;else{flush();out+=n.textContent.replace(/([\\*_`\[\]])/g,'\\$1')}continue}if(n.nodeType!==1)continue;
- if(n.classList.contains('kw-unit')){if(!Object.keys(extractStyles(n)).length){kamo+=n.dataset.raw||'';continue}flush();let content='\\kamotish{'+(n.dataset.raw||'')+'}';for(const [field,val] of Object.entries(extractStyles(n))){if(field==='fontWeight'&&val==='bold')content='**'+content+'**';else if(field==='fontStyle'&&val==='italic')content='*'+content+'*';else if(field==='textDecoration'&&val.includes('underline'))content='<u>'+content+'</u>';else content=`<span style="${field.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}:${safe(val)}">${content}</span>`;}out+=content;continue}
- if(n.classList.contains('kamo-run')){flush();out+=serializeInline(n,true);continue}
- flush();let v=serializeInline(n,insideRun);switch(n.tagName){case'IMG':if((n.getAttribute('src')||'').startsWith('data:image/svg+xml')){v='<img src="'+safe(n.getAttribute('src'))+'" alt="'+safe(n.alt||'')+'">';break;}v='!['+(n.alt||'').replace(/[\[\]]/g,'')+'](<'+(n.dataset.originalSrc||n.getAttribute('src')||'').replace(/>/g,'%3E')+'>)';break;case'BR':v='  \n';break;case'B':case'STRONG':v='**'+v+'**';break;case'I':case'EM':v='*'+v+'*';break;case'U':v='<u>'+v+'</u>';break;case'S':case'STRIKE':v='~~'+v+'~~';break;case'A':v='['+v+']('+safe(n.getAttribute('href')||'')+')';break;default:if(Object.keys(extractStyles(n)).length){const css=Object.entries(extractStyles(n)).map(([k,w])=>k.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())+':'+safe(w)).join(';');v='<span style="'+css+'">'+v+'</span>'}}out+=v}
- flush();return out;
-}
-function blockMd(n){
- if(n.nodeType===3)return n.textContent.trim();if(n.nodeType!==1)return '';
- const tag=n.tagName,s=serializeInline(n).trim(),align=n.style.textAlign||'';let result;
- if(/^H[1-6]$/.test(tag))result='#'.repeat(+tag[1])+' '+s;
- else if(tag==='BLOCKQUOTE')result=[...n.childNodes].map(blockMd).filter(Boolean).join('\n\n').split('\n').map(line=>'> '+line).join('\n');
- else if(tag==='UL'||tag==='OL')result=[...n.children].map((li,i)=>(tag==='UL'?'- ':`${i+1}. `)+serializeInline(li).trim()).join('\n');
- else if(tag==='HR')result='---';
- else if(tag==='PRE'){
-   const fence='`'.repeat(Math.max(3,...[...n.textContent.matchAll(/`+/g)].map(m=>m[0].length+1)));
-   result=fence+'\n'+n.textContent.replace(/\n$/,'')+'\n'+fence;
- }else if(tag==='TABLE'){
-   const rows=[...n.querySelectorAll('tr')].map(tr=>[...tr.children].map(td=>serializeInline(td).trim().replace(/\|/g,'\\|').replace(/\n/g,'<br>')));
-   if(!rows.length)return '';
-   const width=Math.max(...rows.map(r=>r.length)),row=r=>'| '+Array.from({length:width},(_,i)=>r[i]||'').join(' | ')+' |';
-   result=[row(rows[0]),row(Array(width).fill('---')),...rows.slice(1).map(row)].join('\n');
- }else result=s;
- return align&&align!=='left'?`<div style="text-align:${align}">\n\n${result}\n\n</div>`:result;
-}
-function exportMarkdown(){return '<!-- Kamotish Writer Markdown. For exact roundtrip, use .kamodoc -->\n\n'+[...editor.childNodes].map(blockMd).filter(Boolean).join('\n\n').trim()+'\n'}
-function exportMd(){download(filename()+'.md',exportMarkdown(),'text/markdown;charset=utf-8');notify('Markdown 已导出');}$('pdfBtn').onclick=()=>{deactivate();options.onExport?.(exportDocument())};
-const markdown = window.markdownit({html:true,linkify:true}).use(window.markdownitKamotish, Kamotish);
-markdown.renderer.rules.kamotish = (tokens,i) => makeKamoRun(tokens[i].content).outerHTML;
-function importMarkdown(source, {imageSources,documentPath}={}) {
- const dom=new DOMParser().parseFromString(markdown.render(source),'text/html');
- dom.querySelectorAll('script,style,iframe,object,embed,form,input,button').forEach(e=>e.remove());
- dom.querySelectorAll('img').forEach(img=>{
-   const src=img.getAttribute('src')||''; img.dataset.originalSrc=src;
-   if(imageSources&&!/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)){
-     const key=new URL(src,new URL(documentPath||'','https://kamotish.invalid/')).pathname;
-     if(Object.prototype.hasOwnProperty.call(imageSources,key))img.src=imageSources[key];
-   }
- });
- editor.replaceChildren(...[...dom.body.childNodes].map(nodeToAst).filter(Boolean).map(astToNode));
- changed();
-}
-async function openMarkdown(d){
- await ready;if(hasDocument&&!(await save()))throw Error('当前文稿尚未保存，未切换文稿');
- loadingDocument=true;hasDocument=true;deactivate();docId=d.writerId||crypto.randomUUID();createdAt=new Date().toISOString();
- if(d.writerId){const previous=await KamotishLibrary.get(d.writerId);if(previous)createdAt=previous.createdAt;}
- openedDocument=d;importMarkdown(d.md,d);$('docTitle').value=d.name.replace(/\.(md|markdown)$/i,'');
- baseline=JSON.stringify(exportNative().content)+$('docTitle').value;revision=1;savedRevision=0;loadingDocument=false;
- showDocument();await save(true);notify('文稿已载入');
-}
-$('folderCancel').onclick=()=>{$('folderDialog').hidden=true;};
-$('folderInput').onchange=async e=>{
- try{
-   const docs=await window.KamotishFiles.readEntries([...e.target.files].map(file=>({file,path:file.webkitRelativePath||file.name})));
-   if(!docs.length)throw Error('文件夹中没有 Markdown 文档');
-   const list=$('folderFiles');list.replaceChildren();
-   for(const d of docs){const b=document.createElement('button');b.textContent=decodeURIComponent(d.documentPath);b.onclick=async()=>{try{await openMarkdown(d);$('folderDialog').hidden=true;}catch(e){notify(e.message);}};list.append(b);}
-   $('folderDialog').hidden=false;
- }catch(ex){notify('导入失败: '+ex.message);}finally{e.target.value='';}
-};
-$('fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{
- if(f.size>60*1024*1024)throw Error('文件过大 (上限 60 MB)');const src=await f.text();
- if(/\.kamodoc$/i.test(f.name))await openNativeDocument(JSON.parse(src));
- else if(/\.html?$/i.test(f.name)){const dom=new DOMParser().parseFromString(src,'text/html');dom.querySelectorAll('script,style,iframe,object,embed').forEach(x=>x.remove());await openMarkdown({name:f.name,md:dom.body.textContent});}
- else await openMarkdown({name:f.name,md:src});
- }catch(ex){notify('导入失败: '+ex.message);}e.target.value='';};
-async function save(force=false){
- clearTimeout(saveTimer);if(!hasDocument||loadingDocument||(!force&&revision===savedRevision))return true;
- const id=docId,version=revision,source=openedDocument?{name:openedDocument.name,md:openedDocument.md,documentPath:openedDocument.documentPath,writerId:id}:null;
- const record={id,title:$('docTitle').value||'未命名文稿',createdAt,updatedAt:new Date().toISOString(),document:exportNative(),source,baseline};
- $('saveStatus').textContent='正在保存…';
- const result=saveQueue.then(()=>KamotishLibrary.put(record));saveQueue=result.catch(()=>{});
- try{await result;if(hasDocument&&docId===id){savedRevision=Math.max(savedRevision,version);$('saveStatus').textContent=revision===savedRevision?'已保存到此浏览器':'尚未保存';}return true;}
- catch(e){if(docId===id)$('saveStatus').textContent='保存失败 · 请下载备份';notify('文稿保存失败: '+e.message);return false;}
-}
-function restoreDoc(){try{const raw=localStorage.getItem('kamotish-writer-v2');if(raw){importNative(JSON.parse(raw));return true}}catch(e){console.warn('Native recovery failed:',e)}
- try{const v1=JSON.parse(localStorage.getItem('kamotish-writer-v1'));if(v1&&typeof v1.html==='string'&&typeof v1.title==='string'){const dom=new DOMParser().parseFromString(v1.html,'text/html');dom.querySelectorAll('script,style,iframe,object,embed,form,input,button').forEach(x=>x.remove());dom.querySelectorAll('*').forEach(e=>{for(const a of [...e.attributes])if(/^on/i.test(a.name))e.removeAttribute(a.name)});editor.innerHTML=dom.body.innerHTML;$('docTitle').value=v1.title;upgradeOldTokens();notify('已迁移旧版文稿; 建议导出 .kamodoc 备份');return true}}catch(e){console.warn('v1 recovery failed:',e)}return false}
-editor.addEventListener('input',()=>{stopIme();changed()});$('docTitle').addEventListener('input',changed);
-container.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save().then(ok=>{if(ok)notify('已保存到我的文稿');})}
- if((e.ctrlKey||e.metaKey)&&['+','=','-','0'].includes(e.key)&&document.activeElement===editor){e.preventDefault();setZoom(e.key==='0'?1:zoom+(e.key==='-'?-.1:.1))}
- if(e.key==='Escape'){if(composing)stopIme();closeTone();closeDropdown();if(!$('kamoDialog').hidden)$('cancelInsert').click();for(const id of ['tableDialog','nameDialog','deleteDialog'])$(id).hidden=true;}});
-try{const savedZoom=localStorage.getItem('kamotish-writer-zoom');if(savedZoom)setZoom(Number(savedZoom));}catch{zoom=1;}
-if(localStorage.getItem('kamotish-writer-sidebar')==='hidden'){layout.classList.add('collapsed');$('sideToggle').setAttribute('aria-expanded','false')}
-function showDocument(){
- typingSize=null;
- $('libraryView').hidden=true;$('documentView').hidden=false;selectionBefore=null;
- workspace.scrollTop=0;fitWidth();
-}
-async function refreshLibrary(){
- libraryRecords=await KamotishLibrary.list();renderLibrary();
-}
-function renderLibrary(){
- const term=$('librarySearch').value.trim().toLocaleLowerCase();
- const records=libraryRecords.filter(d=>d.title.toLocaleLowerCase().includes(term));
- records.sort($('librarySort').value==='title'?(a,b)=>a.title.localeCompare(b.title,'zh'):(a,b)=>b.updatedAt.localeCompare(a.updatedAt));
- $('libraryCount').textContent=libraryRecords.length+' 份文稿';
- $('libraryStatus').textContent=records.length?'':term?'没有找到匹配的文稿':'还没有文稿。新建一份，或从文件菜单导入已有文档。';
- const list=$('libraryList');list.replaceChildren();
- for(const record of records){
-   const row=document.createElement('div');row.className='library-row';row.dataset.documentId=record.id;
-   const open=document.createElement('button');open.className='library-open';
-   open.innerHTML='<span class="document-symbol" aria-hidden="true">▤</span><span><strong>'+safe(record.title)+'</strong><small>'+safe(new Date(record.updatedAt).toLocaleString('zh-CN'))+' 修改</small></span>';
-   open.onclick=()=>openSavedDocument(record.id).catch(e=>notify(e.message));
-   const more=document.createElement('details');more.className='document-actions';
-   const summary=document.createElement('summary');summary.textContent='⋯';summary.setAttribute('aria-label',record.title+'的操作');more.append(summary);
-   const actions=document.createElement('div');actions.className='document-action-menu';
-   for(const [label,action] of [['重命名',()=>renameDocument(record.id)],['创建副本',()=>duplicateDocument(record.id)],['删除',()=>requestDelete(record)]]){
-     const button=document.createElement('button');button.textContent=label;if(label==='删除')button.className='danger';
-     button.onclick=()=>{more.open=false;try{action()?.catch?.(e=>notify(e.message));}catch(e){notify(e.message);}};actions.append(button);
-   }
-   more.append(actions);row.append(open,more);list.append(row);
- }
-}
-function askName(heading,value,action){
- nameAction=action;$('nameHeading').textContent=heading;$('nameInput').value=value;$('nameDialog').hidden=false;
- $('nameInput').focus();$('nameInput').select();
-}
-$('nameCancel').onclick=()=>{$('nameDialog').hidden=true;nameAction=null;};
-$('nameForm').onsubmit=async e=>{
- e.preventDefault();const name=$('nameInput').value.trim();if(!name)return;
- const submit=$('nameForm').querySelector('[type="submit"]');submit.disabled=true;
- try{await nameAction?.(name);$('nameDialog').hidden=true;nameAction=null;}catch(error){notify(error.message);}finally{submit.disabled=false;}
-};
-function newDocument(){askName('新建文稿','未命名文稿',name=>openNativeDocument({format:'Kamotish Writer',schemaVersion:2,title:name,content:[{t:'element',tag:'p',children:[{t:'element',tag:'br',children:[]}]}]}));}
-async function openNativeDocument(document){
- await ready;if(hasDocument&&!(await save()))throw Error('当前文稿尚未保存，未切换文稿');
- // Validate before replacing the current document.
- if(document?.format!=='Kamotish Writer'||document.schemaVersion!==2||!Array.isArray(document.content)||document.content.length>100000)throw Error('不是支持的 .kamodoc 文稿');
- loadingDocument=true;hasDocument=true;deactivate();openedDocument=null;baseline='';createdAt=new Date().toISOString();
- importNative(Object.assign({},document,{id:crypto.randomUUID()}));revision=1;savedRevision=0;loadingDocument=false;showDocument();await save(true);
-}
-async function openSavedDocument(id){
- await ready;if(hasDocument&&!(await save()))throw Error('当前文稿尚未保存，未切换文稿');
- const record=await KamotishLibrary.get(id);if(!record)throw Error('这份文稿已不存在');
- loadingDocument=true;hasDocument=true;deactivate();openedDocument=record.source;baseline=record.baseline||'';createdAt=record.createdAt;
- importNative(record.document);revision=0;savedRevision=0;loadingDocument=false;$('saveStatus').textContent='已保存到此浏览器';showDocument();
-}
-async function closeDocument(){
- if(hasDocument){if(!(await save()))return;options.onDocumentClosed?.(exportDocument());}
- clearTimeout(saveTimer);hasDocument=false;openedDocument=null;selectionBefore=null;deactivate();
- $('documentView').hidden=true;$('libraryView').hidden=false;editor.replaceChildren();
- await refreshLibrary();
-}
-async function renameDocument(id){
- const record=id===docId&&hasDocument?{title:$('docTitle').value}:await KamotishLibrary.get(id);
- if(!record)throw Error('文稿已不存在');
- askName('重命名文稿',record.title,async title=>{
-   if(hasDocument&&docId===id){$('docTitle').value=title;changed();await save();}
-   else{const stored=await KamotishLibrary.get(id);const unchanged=stored.source&&stored.baseline===JSON.stringify(stored.document.content)+stored.document.title;stored.title=title;stored.document.title=title;stored.updatedAt=new Date().toISOString();if(stored.source){stored.source.name=title+'.md';stored.baseline=unchanged?JSON.stringify(stored.document.content)+title:'';}await KamotishLibrary.put(stored);}
-   options.onDocumentRenamed?.(id,title);await refreshLibrary();
- });
-}
-async function duplicateDocument(id){
- const record=await KamotishLibrary.get(id);if(!record)throw Error('文稿已不存在');
- const unchanged=record.source&&record.baseline===JSON.stringify(record.document.content)+record.document.title;
- record.id=crypto.randomUUID();record.title+='（副本）';record.createdAt=record.updatedAt=new Date().toISOString();record.document.id=record.id;record.document.title=record.title;
- if(record.source){record.source.name=record.title+'.md';record.source.writerId=record.id;record.baseline=unchanged?JSON.stringify(record.document.content)+record.title:'';}
- await KamotishLibrary.put(record);await refreshLibrary();notify('已创建副本');
-}
-function requestDelete(record){deleteTarget=record.id;$('deleteMessage').textContent='将从此浏览器的文稿库中删除“'+record.title+'”。已下载的文件不会受影响。';$('deleteDialog').hidden=false;$('deleteCancel').focus();}
-$('deleteCancel').onclick=()=>{$('deleteDialog').hidden=true;deleteTarget=null;};
-$('deleteConfirm').onclick=async()=>{
- if(!deleteTarget)return;try{await KamotishLibrary.remove(deleteTarget);options.onDocumentDeleted?.(deleteTarget);$('deleteDialog').hidden=true;deleteTarget=null;await refreshLibrary();notify('文稿已删除');}catch(e){notify(e.message);}
-};
-$('librarySearch').oninput=renderLibrary;$('librarySort').onchange=renderLibrary;
-$('newDocument').onclick=newDocument;$('backToLibrary').onclick=()=>closeDocument().catch(e=>notify(e.message));
-async function initializeLibrary(){
- try{
-   if(!(await KamotishLibrary.meta('legacy-migrated'))){
-     loadingDocument=true;
-     if(restoreDoc()){
-       const native=exportNative(),now=new Date().toISOString();
-       await KamotishLibrary.put({id:native.id,title:native.title||'恢复的文稿',createdAt:now,updatedAt:now,document:native,source:null,baseline:''});
-     }
-     await KamotishLibrary.setMeta('legacy-migrated',true);loadingDocument=false;
-   }
-   editor.replaceChildren();hasDocument=false;await refreshLibrary();
- }catch(e){loadingDocument=false;$('libraryStatus').textContent='无法打开本地文稿库: '+e.message;throw e;}
-}
-function restoreInsertionPoint(){
- editor.focus({preventScroll:true});const selection=getSelection();
- if(selectionBefore&&editor.contains(selectionBefore.startContainer)){selection.removeAllRanges();selection.addRange(selectionBefore.cloneRange());}
- else{const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);selection.removeAllRanges();selection.addRange(range);}
-}
-function insertHtmlAtCaret(html){
- if(!hasDocument)return;restoreInsertionPoint();
- if(!document.execCommand('insertHTML',false,html))throw Error('无法在此处插入内容，请将光标放到正文中');
- saveSelection();changed();
-}
-function openTableDialog(){saveSelection();insertionTarget=docId;$('tableDialog').hidden=false;$('tableRows').focus();}
-$('tableCancel').onclick=()=>{$('tableDialog').hidden=true;editor.focus();};
-$('tableForm').onsubmit=e=>{
- e.preventDefault();if(!hasDocument||insertionTarget!==docId)return;
- const rows=Number($('tableRows').value),cols=Number($('tableColumns').value);
- if(!Number.isInteger(rows)||rows<1||rows>30||!Number.isInteger(cols)||cols<1||cols>12)return;
- const table=document.createElement('table');
- for(let r=0;r<rows;r++){const row=table.insertRow();for(let c=0;c<cols;c++){const cell=document.createElement(r===0&&$('tableHeader').checked?'th':'td');cell.append(document.createElement('br'));row.append(cell);}}
- $('tableDialog').hidden=true;insertHtmlAtCaret(table.outerHTML+'<p><br></p>');
-}
-function chooseImages(){saveSelection();insertionTarget=docId;$('imageInput').click();}
-$('imageInput').onchange=async e=>{
- const target=insertionTarget,files=[...e.target.files];e.target.value='';
- try{
-   const images=[];
-   for(const file of files){
-     if(!/^image\//.test(file.type))throw Error('请选择图片文件');
-     const img=document.createElement('img');img.src=await KamotishFiles.imageData(file);img.alt=file.name.replace(/\.[^.]+$/,'');images.push(img.outerHTML);
-   }
-   if(!hasDocument||docId!==target)return notify('当前文稿已切换，已取消插入图片');
-   if(images.length)insertHtmlAtCaret(images.join('')+'<p><br></p>');
- }catch(error){notify('插入图片失败: '+error.message);}
+const insertHardBreak = (state, dispatch) => { if (dispatch) dispatch(state.tr.replaceSelectionWith(nodes.hard_break.create()).scrollIntoView()); return true; };
+const insertHr = (state, dispatch) => {
+  if (dispatch) { const tr = state.tr.replaceSelectionWith(nodes.horizontal_rule.create()); dispatch(tr.scrollIntoView()); }
+  return true;
 };
 
-const ready=initializeLibrary();
-window.addEventListener('pagehide',()=>save());
-window.addEventListener('beforeunload',e=>{if(hasDocument&&revision!==savedRevision){e.preventDefault();e.returnValue='';}});
-function deactivate(){visualCaret.hidden=true;stopIme();closeTone();closeDropdown();$('kamoDialog').hidden=true;$('folderDialog').hidden=true;$('tableDialog').hidden=true;}
-function exportDocument(){
- if(!hasDocument)return null;
- const name=filename()+'.md',documentPath=openedDocument?.documentPath||'/'+encodeURIComponent(name);
- const unchanged=openedDocument && baseline===JSON.stringify(exportNative().content)+$('docTitle').value;
- const imageSources=Object.assign(Object.create(null),openedDocument?.imageSources);
- for(const img of editor.querySelectorAll('img')){
-   const src=img.dataset.originalSrc||img.getAttribute('src');
-   if(src&&!/^[a-z][a-z0-9+.-]*:/i.test(src)&&img.src.startsWith('data:image/')){
-     const key=new URL(src,new URL(documentPath,'https://kamotish.invalid/')).pathname;
-     imageSources[key]=img.src;
-   }
- }
- return {writerId:docId,name:unchanged?openedDocument.name:name,md:unchanged?openedDocument.md:exportMarkdown(),documentPath,imageSources};
+/* ---------- Font sizes ---------- */
+const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
+const BASE_PT = { paragraph: 12, code_block: 10.5, 1: 24, 2: 18, 3: 14, 4: 12, 5: 12, 6: 12 };
+function toPt(size) {
+  const m = /^(\d+(?:\.\d+)?)(pt|px|em|rem|%)$/.exec(size || ''); if (!m) return null;
+  const n = Number(m[1]); return Math.round((m[2] === 'pt' ? n : m[2] === 'px' ? n * .75 : m[2] === '%' ? n / 100 * 12 : n * 12) * 100) / 100;
 }
-function fitWidth(){if(automaticZoom&&workspace.clientWidth)setZoom(Math.min(1,(workspace.clientWidth-50)/794),false);}
-window.addEventListener('resize',()=>{if(!container.hidden)fitWidth();});
-return {ready,openMarkdown,exportDocument,exportNative,importNative,exportMarkdown,deactivate,save,closeDocument,newDocument,openSavedDocument,hasDocument:()=>hasDocument,activate(){if(!hasDocument)refreshLibrary().catch(e=>notify(e.message));fitWidth();if(matchMedia('(max-width:760px)').matches)$('sideToggle').setAttribute('aria-expanded',String(layout.classList.contains('outline-open')));}};
+function selectionSizes(state) {
+  const sizes = new Set(), { empty, $from } = state.selection;
+  const base = parent => parent.type === nodes.heading ? BASE_PT[parent.attrs.level] : BASE_PT[parent.type.name] || 12;
+  if (empty) { const m = marks.fontSize.isInSet(state.storedMarks || $from.marks()); sizes.add(m ? toPt(m.attrs.size) : base($from.parent)); return [...sizes]; }
+  for (const [from, to] of selectionRanges(state)) state.doc.nodesBetween(from, to, (node, pos, parent) => {
+    if (!node.isInline || node.type === nodes.hard_break) return;
+    const m = marks.fontSize.isInSet(node.marks); sizes.add(m ? toPt(m.attrs.size) : base(parent));
+  });
+  return sizes.size ? [...sizes] : [base($from.parent)];
+}
+function applySize(pt) {
+  if (!Number.isFinite(pt) || pt < 1 || pt > 400) { notify('字号请输入 1–400 之间的数值（磅）'); updateToolbar(); return; }
+  run(setMark(marks.fontSize, { size: Math.round(pt * 100) / 100 + 'pt' }));
+}
+function stepSize(direction) {
+  const current = selectionSizes(view.state)[0] || 12;
+  const next = direction > 0 ? SIZES.find(s => s > current) ?? Math.min(400, current + 10) : [...SIZES].reverse().find(s => s < current) ?? Math.max(1, current - 1);
+  applySize(next);
+}
+
+/* ---------- Kamotish IME and atoms ---------- */
+const IME_PAGE_SIZE = 6;
+function setMode(m) { stopIme(); mode = m; $('kamoMode').classList.toggle('active', m === 'kamo'); $('nativeMode').classList.toggle('active', m === 'native'); notify(m === 'kamo' ? '卡谋语拼音已开启' : '系统输入法已开启'); view.focus(); }
+$('kamoMode').onclick = () => setMode('kamo'); $('nativeMode').onclick = () => setMode('native');
+for (const b of [$('kamoMode'), $('nativeMode')]) b.addEventListener('mousedown', e => e.preventDefault());
+KamoIME.onupdate = status => { $('dictionaryStatus').textContent = status; if (composing) drawIme(); };
+KamoIME.init();
+function stopIme() { composing = ''; ime.hidden = true; active = 0; items = []; }
+function insertSource(source) {
+  const state = view.state, { $from } = state.selection;
+  if ($from.parent.type.spec.code) { view.dispatch(state.tr.insertText(source)); return; }
+  const inherited = (state.storedMarks || $from.marks()).filter(m => m.type !== marks.kamoRun);
+  // Consecutive graphemes join the previous run: \mi\wou is unambiguous source. A syllable
+  // after another unit starts a new run, otherwise its letters would merge on export.
+  const before = state.selection.empty ? $from.nodeBefore : null, previousRun = before && marks.kamoRun.isInSet(before.marks);
+  const runId = previousRun && source.startsWith('\\') ? previousRun.attrs.id : M.newRunId();
+  const content = M.nodesFromSource(source, inherited, runId);
+  const tr = state.tr.replaceSelection(new Slice(Fragment.fromArray(content), 0, 0));
+  tr.setStoredMarks(inherited);
+  view.dispatch(tr.scrollIntoView());
+}
+function caretRect() { const { head } = view.state.selection; try { return view.coordsAtPos(head); } catch { return view.dom.getBoundingClientRect(); } }
+function placeFixed(el, rect) {
+  el.hidden = false; const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(innerWidth - w - 9, rect.left)) + 'px';
+  el.style.top = (rect.bottom + h + 10 > innerHeight ? Math.max(8, rect.top - h - 7) : rect.bottom + 7) + 'px';
+}
+function placeIme() { if (composing) placeFixed(ime, caretRect()); }
+function preview(x) { return x.type === 'glyph' || x.type === 'phon' ? Kamotish.renderInline(x.value) : safe(x.value); }
+function drawIme() {
+  if (!composing) { ime.hidden = true; return; }
+  items = KamoIME.candidates(composing); active = Math.min(active, Math.max(0, items.length - 1));
+  const page = Math.floor(active / IME_PAGE_SIZE), start = page * IME_PAGE_SIZE;
+  $('composition').textContent = composing;
+  $('candidates').innerHTML = items.slice(start, start + IME_PAGE_SIZE).map((c, j) => `<button data-i="${start + j}" class="candidate ${start + j === active ? 'selected' : ''}"><span class="kamoPreview">${preview(c)}</span><span class="caption">${safe(c.label)}</span></button>`).join('');
+  container.querySelector('.imeFoot').textContent = `1–4 一至四声 · ←→ 选择 · ↑↓ 翻页 · Enter/空格 确认 · ${page + 1}/${Math.max(1, Math.ceil(items.length / IME_PAGE_SIZE))} 页 · Esc`;
+  placeIme();
+}
+function chooseTone(tone) {
+  const selected = items[active], target = selected && ['glyph', 'phon'].includes(selected.type) ? selected : items.find(c => ['glyph', 'phon'].includes(c.type));
+  if (!target) return;
+  stopIme(); insertSource(target.value.replace(/\\[1-4]$/, '') + (tone === '1' ? '' : '\\' + tone));
+}
+function choose(i = active) {
+  const c = items[i]; if (!c) return;
+  stopIme();
+  if (c.type === 'glyph' || c.type === 'phon') insertSource(c.value); else view.dispatch(view.state.tr.insertText(c.value).scrollIntoView());
+}
+$('candidates').addEventListener('mousedown', e => e.preventDefault());
+$('candidates').addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) { choose(Number(b.dataset.i)); view.focus(); } });
+function imeKeyDown(view, e) {
+  if (mode !== 'kamo' || e.isComposing || e.keyCode === 229) return false;
+  if (composing) {
+    if (e.ctrlKey || e.metaKey || e.altKey) { stopIme(); return false; }
+    if (e.key === 'Escape') { stopIme(); return true; }
+    if (e.key === 'Backspace') { composing = composing.slice(0, -1); drawIme(); return true; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const pages = Math.max(1, Math.ceil(items.length / IME_PAGE_SIZE));
+      const page = Math.max(0, Math.min(pages - 1, Math.floor(active / IME_PAGE_SIZE) + (e.key === 'ArrowDown' ? 1 : -1)));
+      active = Math.min(items.length - 1, page * IME_PAGE_SIZE + active % IME_PAGE_SIZE); drawIme(); return true;
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const start = Math.floor(active / IME_PAGE_SIZE) * IME_PAGE_SIZE, count = Math.min(IME_PAGE_SIZE, items.length - start);
+      active = start + (active - start + (e.key === 'ArrowRight' ? 1 : count - 1)) % Math.max(1, count); drawIme(); return true;
+    }
+    if (/^[1-4]$/.test(e.key)) { chooseTone(e.key); return true; }
+    if (e.key === ' ' || e.key === 'Enter') { choose(); return true; }
+    if (/^[a-z']$/i.test(e.key)) { composing += e.key.toLowerCase(); active = 0; drawIme(); return true; }
+    if (e.key === '-') { composing += "'"; active = 0; drawIme(); return true; }
+    if (e.key.length === 1) { if (items[0]) choose(0); view.dispatch(view.state.tr.insertText(e.key).scrollIntoView()); return true; }
+    if (e.key === 'Tab') { choose(); return true; }
+    stopIme(); return false;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  const sel = view.state.selection;
+  // A selected grapheme: 1–4 changes its tone, as in the tone picker.
+  if (sel instanceof NodeSelection && sel.node.type === nodes.kamo && /^[1-4]$/.test(e.key)) {
+    if (sel.node.attrs.kind === 'glyph') { setTone(sel.from, e.key === '1' ? '' : e.key); return true; }
+  }
+  if (/^[a-z]$/i.test(e.key) && !sel.$from.parent.type.spec.code) {
+    closeTone(); closeDropdown(); composing = e.key.toLowerCase(); drawIme(); return true;
+  }
+  return false;
+}
+function closeTone() { toneTarget = null; $('tonePicker').hidden = true; }
+function setTone(pos, tone) {
+  const node = view.state.doc.nodeAt(pos);
+  if (!node || node.type !== nodes.kamo || node.attrs.kind !== 'glyph') return;
+  const raw = '\\' + node.attrs.name + (tone ? '\\' + tone : '');
+  const tr = view.state.tr.setNodeMarkup(pos, null, Object.assign({}, node.attrs, { raw, tone: tone || '' }));
+  tr.setSelection(NodeSelection.create(tr.doc, pos));
+  view.dispatch(closeHistory(tr)); closeTone(); view.focus();
+}
+function showTone(pos) {
+  const node = view.state.doc.nodeAt(pos); if (!node || node.attrs.kind !== 'glyph') return;
+  closeDropdown(); toneTarget = pos;
+  const target = $('toneChoices'); target.replaceChildren();
+  for (let i = 1; i <= 4; i++) {
+    const t = i === 1 ? '' : String(i), b = document.createElement('button');
+    b.className = (node.attrs.tone || '') === t ? 'selected' : ''; b.type = 'button';
+    b.innerHTML = `${Kamotish.renderInline('\\' + node.attrs.name + (t ? '\\' + t : ''))}<small>${M.NAMED_TONES[i - 1]}</small>`;
+    b.onmousedown = e => e.preventDefault(); b.onclick = () => setTone(pos, t); target.append(b);
+  }
+  const dom = view.nodeDOM(pos); placeFixed($('tonePicker'), (dom || view.dom).getBoundingClientRect());
+}
+
+/* ---------- Plugins ---------- */
+// Highlight Kamotish atoms inside a text selection (SVG has no native selection paint).
+const atomSelection = new Plugin({
+  props: {
+    decorations(state) {
+      const { selection } = state; if (selection.empty || selection instanceof NodeSelection) return null;
+      const deco = [];
+      for (const [from, to] of selectionRanges(state)) state.doc.nodesBetween(from, to, (node, pos) => {
+        if (node.type === nodes.kamo) deco.push(Decoration.node(pos, pos + node.nodeSize, { class: 'is-selected' }));
+      });
+      return deco.length ? DecorationSet.create(state.doc, deco) : null;
+    }
+  }
+});
+// Find and replace state, kept in the editor so matches follow every edit.
+const findKey = new PluginKey('find');
+function findMatches(doc, query, caseSensitive) {
+  const result = []; if (!query) return result;
+  const needle = caseSensitive ? query : query.toLocaleLowerCase();
+  doc.descendants((node, pos) => {
+    if (!node.isTextblock) return true;
+    let text = '', map = [];
+    node.forEach((child, offset) => {
+      const s = child.isText ? child.text : '￼';
+      for (let i = 0; i < s.length; i++) map.push(pos + 1 + offset + i);
+      text += s;
+    });
+    const hay = caseSensitive ? text : text.toLocaleLowerCase();
+    for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + Math.max(1, needle.length))) result.push({ from: map[i], to: map[i + needle.length - 1] + 1 });
+    return false;
+  });
+  return result;
+}
+const findPlugin = new Plugin({
+  key: findKey,
+  state: {
+    init: () => ({ query: '', caseSensitive: false, matches: [], index: -1 }),
+    apply(tr, value, old, state) {
+      const meta = tr.getMeta(findKey);
+      if (meta) { const next = Object.assign({}, value, meta); next.matches = findMatches(state.doc, next.query, next.caseSensitive); next.index = next.matches.length ? Math.min(Math.max(0, meta.index ?? value.index), next.matches.length - 1) : -1; return next; }
+      if (tr.docChanged && value.query) { const matches = findMatches(state.doc, value.query, value.caseSensitive); return Object.assign({}, value, { matches, index: matches.length ? Math.min(Math.max(0, value.index), matches.length - 1) : -1 }); }
+      return value;
+    }
+  },
+  props: {
+    decorations(state) {
+      const f = findKey.getState(state); if (!f.query || !f.matches.length) return null;
+      return DecorationSet.create(state.doc, f.matches.map((m, i) => Decoration.inline(m.from, m.to, { class: i === f.index ? 'kw-find kw-find-current' : 'kw-find' })));
+    }
+  }
+});
+// Image node view: Docs-like selection frame and a corner handle to resize.
+class ImageView {
+  constructor(node, view, getPos) {
+    this.node = node; this.view = view; this.getPos = getPos;
+    this.dom = document.createElement('span'); this.dom.className = 'kw-image';
+    this.img = document.createElement('img'); this.dom.append(this.img);
+    this.handle = document.createElement('span'); this.handle.className = 'kw-image-handle'; this.handle.title = '拖动调整大小'; this.dom.append(this.handle);
+    this.handle.addEventListener('pointerdown', e => this.resize(e));
+    this.render();
+  }
+  render() {
+    const a = this.node.attrs; this.img.src = a.src; this.img.alt = a.alt || ''; this.img.title = a.title || '';
+    if (a.width) this.img.style.width = a.width + 'px'; else this.img.style.removeProperty('width');
+  }
+  update(node) { if (node.type !== this.node.type) return false; this.node = node; this.render(); return true; }
+  selectNode() { this.dom.classList.add('ProseMirror-selectednode'); }
+  deselectNode() { this.dom.classList.remove('ProseMirror-selectednode'); }
+  stopEvent(e) { return e.target === this.handle; }
+  ignoreMutation() { return true; }
+  resize(e) {
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX, startWidth = this.img.getBoundingClientRect().width / zoom, max = view.dom.clientWidth - 160;
+    const move = ev => { this.img.style.width = Math.max(24, Math.min(max, startWidth + (ev.clientX - startX) / zoom)) + 'px'; };
+    const up = () => {
+      removeEventListener('pointermove', move); removeEventListener('pointerup', up);
+      const width = Math.round(parseFloat(this.img.style.width)), pos = this.getPos();
+      if (typeof pos !== 'number') return;
+      const tr = view.state.tr.setNodeMarkup(pos, null, Object.assign({}, this.node.attrs, { width }));
+      view.dispatch(closeHistory(tr.setSelection(NodeSelection.create(tr.doc, pos))));
+    };
+    addEventListener('pointermove', move); addEventListener('pointerup', up);
+  }
+}
+function markdownRules() {
+  return inputRules({ rules: [
+    textblockTypeInputRule(/^(#{1,6})\s$/, nodes.heading, m => ({ level: m[1].length })),
+    wrappingInputRule(/^\s*([-+*])\s$/, nodes.bullet_list),
+    wrappingInputRule(/^(\d+)[.)]\s$/, nodes.ordered_list, m => ({ order: +m[1] }), (m, n) => n.childCount + n.attrs.order === +m[1]),
+    wrappingInputRule(/^\s*>\s$/, nodes.blockquote),
+    textblockTypeInputRule(/^```$/, nodes.code_block),
+    // $$ on an empty line starts a formula block; $$…$$ inside a line becomes a block too.
+    new InputRule(/^\$\$$/, (state, match, start) => {
+      const $start = state.doc.resolve(start); if ($start.parent.type !== nodes.paragraph) return null;
+      const tr = state.tr.replaceRangeWith($start.before(), $start.after(), nodes.math_display.create());
+      const pos = tr.mapping.map($start.before(), 1) - 1, at = tr.doc.nodeAt(pos)?.type === nodes.math_display ? pos : $start.before();
+      return tr.setSelection(NodeSelection.create(tr.doc, at)).setMeta('openMath', at);
+    }),
+    new InputRule(/(^|[^$\\])\$\$([^$\n]+)\$\$$/, (state, match, start, end) => {
+      const tex = match[2].trim(); if (!tex) return null;
+      return state.tr.replaceWith(start + match[1].length, end, nodes.math_display.create({ tex }));
+    }),
+    // $…$ becomes an inline formula. No space just inside the dollars, so prices like $5 and $6 stay text.
+    new InputRule(/(^|[^$\\])\$([^\s$](?:[^$\n]*[^\s$\\])?)\$$/, (state, match, start, end) => {
+      const tr = state.tr.replaceWith(start + match[1].length, end, nodes.math_inline.create({ tex: match[2] }));
+      return tr;
+    }),
+    new InputRule(/^(?:---|\*\*\*|___)$/, (state, match, start, end) => {
+      const $start = state.doc.resolve(start); if ($start.parent.type !== nodes.paragraph || $start.depth !== 1) return null;
+      return state.tr.replaceRangeWith($start.before(), $start.after(), nodes.horizontal_rule.create()).insert($start.before() + 1, nodes.paragraph.create());
+    })
+  ] });
+}
+const shortcuts = {
+  'Mod-z': undo, 'Shift-Mod-z': redo, 'Mod-y': redo, Backspace: undoInputRule,
+  'Mod-b': toggle('bold'), 'Mod-i': toggle('italic'), 'Mod-u': toggle('underline'), 'Shift-Mod-x': toggle('strike'),
+  'Mod-.': toggle('sup'), 'Mod-,': toggle('sub'), 'Mod-e': toggle('code'),
+  'Shift-Mod-l': setBlockAttr('align', null), 'Shift-Mod-e': setBlockAttr('align', 'center'), 'Shift-Mod-r': setBlockAttr('align', 'right'), 'Shift-Mod-j': setBlockAttr('align', 'justify'),
+  'Mod-Alt-0': setBlockType(nodes.paragraph), 'Mod-Alt-1': setBlockType(nodes.heading, { level: 1 }), 'Mod-Alt-2': setBlockType(nodes.heading, { level: 2 }), 'Mod-Alt-3': setBlockType(nodes.heading, { level: 3 }),
+  'Shift-Mod-7': toggleList(nodes.ordered_list), 'Shift-Mod-8': toggleList(nodes.bullet_list),
+  'Mod-[': changeIndent(-1), 'Mod-]': changeIndent(1), 'Mod-\\': clearFormatting,
+  'Shift-Mod-.': () => (stepSize(1), true), 'Shift-Mod-,': () => (stepSize(-1), true),
+  'Mod-k': () => (openLinkDialog(), true), 'Mod-f': () => (openFind(false), true), 'Shift-Mod-h': () => (openFind(true), true),
+  'Shift-Mod-c': () => (openCount(), true),
+  'Mod-/': () => (openShortcuts(), true),
+  ArrowLeft: moveOverAtom(-1, false), ArrowRight: moveOverAtom(1, false), 'Shift-ArrowLeft': moveOverAtom(-1, true), 'Shift-ArrowRight': moveOverAtom(1, true),
+  Home: lineEdge(-1, false), End: lineEdge(1, false), 'Shift-Home': lineEdge(-1, true), 'Shift-End': lineEdge(1, true),
+  ...(isMac ? { 'Mod-ArrowLeft': lineEdge(-1, false), 'Mod-ArrowRight': lineEdge(1, false), 'Shift-Mod-ArrowLeft': lineEdge(-1, true), 'Shift-Mod-ArrowRight': lineEdge(1, true) } : {}),
+  'Shift-Enter': chainCommands(exitCode, insertHardBreak),
+  Enter: chainCommands((state) => { const s = state.selection; if (s instanceof NodeSelection && (s.node.type === nodes.math_inline || s.node.type === nodes.math_display)) { openMathEditor(s.from); return true; } return false; }, splitListItem(nodes.list_item)),
+  Tab: chainCommands(T.goToNextCell(1), sinkListItem(nodes.list_item), changeIndent(1), () => true),
+  'Shift-Tab': chainCommands(T.goToNextCell(-1), liftListItem(nodes.list_item), changeIndent(-1), () => true),
+};
+const plugins = [
+  markdownRules(), keymap(shortcuts), keymap(baseKeymap), history(), PM.dropcursor.dropCursor({ color: '#1a73e8', width: 2 }), PM.gapcursor.gapCursor(),
+  T.columnResizing({ cellMinWidth: 40 }), T.tableEditing(), atomSelection, findPlugin
+];
+function newState(doc) { return EditorState.create({ doc, plugins }); }
+
+/* ---------- Clipboard, paste, drop ---------- */
+async function insertImageFiles(files, pos) {
+  const images = files.filter(f => /^image\//.test(f.type)); if (!images.length) return false;
+  const target = docId;
+  try {
+    const content = [];
+    for (const file of images) content.push(nodes.image.create({ src: await KamotishFiles.imageData(file), alt: file.name.replace(/\.[^.]+$/, '') }));
+    if (!hasDocument || docId !== target) return notify('当前文稿已切换，已取消插入图片');
+    const tr = view.state.tr;
+    if (pos == null) tr.replaceSelection(new Slice(Fragment.fromArray(content), 0, 0)); else tr.insert(Math.min(pos, tr.doc.content.size), content);
+    view.dispatch(tr.scrollIntoView()); view.focus();
+  } catch (error) { notify('插入图片失败: ' + error.message); }
+  return true;
+}
+
+const view = new EditorView({ mount: $('editor') }, {
+  state: newState(M.emptyDoc()),
+  nodeViews: { image: (node, view, getPos) => new ImageView(node, view, getPos) },
+  attributes: { spellcheck: 'false', 'aria-multiline': 'true', role: 'textbox' },
+  handleKeyDown: imeKeyDown,
+  handleDOMEvents: {
+    mousedown() { if (composing) stopIme(); closeTone(); return false; },
+    blur() { setTimeout(drawCaret); return false; },
+    focus() { setTimeout(drawCaret); return false; },
+    contextmenu(view, e) { return openContextMenu(e); }
+  },
+  clipboardTextSerializer: slice => M.sliceToText(slice),
+  transformPasted: slice => new Slice(M.expandLiterals(slice.content), slice.openStart, slice.openEnd),
+  handlePaste(view, e) {
+    const files = [...(e.clipboardData?.files || [])];
+    if (files.length && !e.clipboardData.getData('text/html')) { e.preventDefault(); insertImageFiles(files); return true; }
+    return false;
+  },
+  handleDrop(view, e) {
+    const files = [...(e.dataTransfer?.files || [])].filter(f => /^image\//.test(f.type));
+    if (!files.length) return false;
+    e.preventDefault(); const at = view.posAtCoords({ left: e.clientX, top: e.clientY });
+    insertImageFiles(files, at?.pos); return true;
+  },
+  dispatchTransaction(tr) {
+    const state = view.state.apply(tr);
+    view.updateState(state);
+    if (tr.docChanged) changed();
+    const mathAt = tr.getMeta('openMath');
+    if (mathAt != null) setTimeout(() => openMathEditor(mathAt));
+    if (tr.docChanged || tr.selectionSet || tr.storedMarksSet) afterUpdate();
+    else if (tr.getMeta(findKey)) updateFindCount();
+  }
+});
+const editor = view.dom;
+// Clicking a formula opens its editor.
+editor.addEventListener('click', e => {
+  const mathDom = e.target.closest?.('.kw-math, .kw-math-block'); if (!mathDom) return;
+  const pos = view.posAtDOM(mathDom.parentNode, [...mathDom.parentNode.childNodes].indexOf(mathDom));
+  const node = view.state.doc.nodeAt(pos);
+  if (node?.type === nodes.math_inline || node?.type === nodes.math_display) openMathEditor(pos);
+});
+// Clicking a grapheme selects it (ProseMirror) and opens the tone picker.
+editor.addEventListener('click', e => {
+  const unitDom = e.target.closest?.('.kw-unit[data-kind="glyph"]'); if (!unitDom) return;
+  const pos = view.posAtDOM(unitDom.parentNode, [...unitDom.parentNode.childNodes].indexOf(unitDom));
+  if (view.state.doc.nodeAt(pos)?.type === nodes.kamo) showTone(pos);
+});
+
+/* ---------- Atom caret ---------- */
+// Chrome draws no caret next to noneditable inline SVG. Draw one from the document position.
+const visualCaret = $('caret');
+function drawCaret() {
+  visualCaret.hidden = true; editor.classList.remove('atom-caret');
+  const { selection } = view.state;
+  if (!hasDocument || composing || !view.hasFocus() || !selection.empty) return;
+  const $pos = selection.$head, before = $pos.nodeBefore, after = $pos.nodeAfter;
+  const atom = before?.type === nodes.kamo ? before : after?.type === nodes.kamo ? after : null; if (!atom) return;
+  const dom = view.nodeDOM(before === atom ? $pos.pos - before.nodeSize : $pos.pos); if (!dom?.getBoundingClientRect) return;
+  const rect = dom.getBoundingClientRect(), bounds = workspace.getBoundingClientRect();
+  const height = parseFloat(getComputedStyle(dom).fontSize) * zoom * 1.15, x = before === atom ? rect.right : rect.left, y = rect.bottom - height;
+  if (y + height < bounds.top || y > bounds.bottom || x < bounds.left || x > bounds.right) return;
+  visualCaret.style.cssText = `left:${x - 1}px;top:${y}px;height:${height}px`; visualCaret.hidden = false; editor.classList.add('atom-caret');
+}
+
+/* ---------- Toolbar state ---------- */
+const BLOCK_STYLES = [['p', '正文', 'Mod-Alt-0'], ['h1', '标题 1', 'Mod-Alt-1'], ['h2', '标题 2', 'Mod-Alt-2'], ['h3', '标题 3', 'Mod-Alt-3'], ['h4', '标题 4'], ['blockquote', '引用'], ['pre', '代码块']];
+const FONTS = [['', '宋体（默认）', "'Songti SC','Noto Serif CJK SC',serif"], ['sans-serif', '黑体', "'PingFang SC','Noto Sans CJK SC',sans-serif"], ["'Kaiti SC','STKaiti','KaiTi',serif", '楷体', "'Kaiti SC','STKaiti','KaiTi',serif"], ['serif', 'Serif', 'serif'], ['Georgia,serif', 'Georgia', 'Georgia,serif'], ['Arial,sans-serif', 'Arial', 'Arial,sans-serif'], ['monospace', '等宽字体', 'monospace']];
+const LINE_HEIGHTS = [['1', '单倍'], ['1.15', '1.15'], ['1.5', '1.5 倍'], ['', '默认 (1.9)'], ['2', '双倍']];
+const TEXT_COLORS = ['#000000', '#434343', '#666666', '#999999', '#b7b7b7', '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff',
+  '#980000', '#ff0000', '#ff9900', '#ffff00', '#00ff00', '#00ffff', '#4a86e8', '#0000ff', '#9900ff', '#ff00ff',
+  '#e6b8af', '#f4cccc', '#fce5cd', '#fff2cc', '#d9ead3', '#d0e0e3', '#c9daf8', '#cfe2f3', '#d9d2e9', '#ead1dc',
+  '#cc4125', '#e06666', '#f6b26b', '#ffd966', '#93c47d', '#76a5af', '#6d9eeb', '#6fa8dc', '#8e7cc3', '#c27ba0',
+  '#a61c00', '#cc0000', '#e69138', '#f1c232', '#6aa84f', '#45818e', '#3c78d8', '#3d85c6', '#674ea7', '#a64d79',
+  '#5b0f00', '#660000', '#783f04', '#7f6000', '#274e13', '#0c343d', '#1c4587', '#073763', '#20124d', '#4c1130'];
+function currentBlockValue(state) {
+  if (inBlockquote(state)) return 'blockquote';
+  const p = state.selection.$from.parent;
+  return p.type === nodes.heading ? 'h' + p.attrs.level : p.type === nodes.code_block ? 'pre' : 'p';
+}
+const fontKey = f => String(f || '').replace(/["']/g, '').replace(/\s*,\s*/g, ',').toLowerCase();
+function fontLabel(family) { if (!family) return '宋体'; const f = FONTS.find(x => fontKey(x[0]) === fontKey(family)); return f ? f[1].replace('（默认）', '') : family.split(',')[0].replace(/['"]/g, ''); }
+function updateToolbar() {
+  const state = view.state, { $from } = state.selection;
+  for (const b of container.querySelectorAll('[data-mark]')) { const on = markActive(state, marks[b.dataset.mark]); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
+  const style = BLOCK_STYLES.find(s => s[0] === currentBlockValue(state));
+  $('blockStyle').querySelector('.label').textContent = style ? style[1] : '正文';
+  const families = [...new Set(marksAtSelection(state, marks.fontFamily).map(m => m?.attrs.family || ''))];
+  $('fontFamily').querySelector('.label').textContent = families.length === 1 ? fontLabel(families[0]) : '混合';
+  if (document.activeElement !== $('fontSize')) {
+    const sizes = selectionSizes(state);
+    $('fontSize').value = sizes.length === 1 ? String(sizes[0]) : ''; $('fontSize').placeholder = sizes.length > 1 ? '混合' : '';
+  }
+  const align = $from.parent.attrs.align || 'left';
+  for (const b of container.querySelectorAll('[data-align]')) b.classList.toggle('on', b.dataset.align === align);
+  const list = listAncestor(state);
+  for (const b of container.querySelectorAll('[data-list]')) b.classList.toggle('on', list?.node.type.name === b.dataset.list);
+  $('undoBtn').disabled = undoDepth(state) === 0; $('redoBtn').disabled = redoDepth(state) === 0;
+  const color = marksAtSelection(state, marks.color)[0], highlight = marksAtSelection(state, marks.highlight)[0];
+  container.querySelector('.colorMark').style.background = color ? color.attrs.color : '#000';
+  container.querySelector('.highlightMark').style.background = highlight ? highlight.attrs.color : 'transparent';
+}
+function afterUpdate() {
+  updateToolbar(); drawCaret(); updateLinkBubble(); updateFindCount(); placeIme();
+  if (toneTarget != null) { const n = view.state.doc.nodeAt(toneTarget); if (!n || n.type !== nodes.kamo) closeTone(); }
+  highlightOutline();
+}
+
+/* ---------- Outline and counter ---------- */
+let headings = [];
+function refreshOutline() {
+  const root = $('outline'); root.replaceChildren(); headings = [];
+  view.state.doc.descendants((node, pos) => {
+    if (node.type === nodes.heading) {
+      if (node.attrs.level <= 3) {
+        const b = document.createElement('button'); b.className = 'h' + node.attrs.level;
+        b.textContent = node.textContent.trim() || (node.childCount ? '卡谋语标题' : '未命名标题');
+        b.onclick = () => { const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + 1)); view.dispatch(tr); view.focus(); const dom = view.nodeDOM(pos); dom?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+        root.append(b); headings.push({ pos, button: b });
+      }
+      return false;
+    }
+    return node.type === nodes.blockquote;
+  });
+  const c = M.countText(view.state.doc); $('counter').textContent = c.chars.toLocaleString('zh-CN') + ' 字';
+  highlightOutline();
+}
+function highlightOutline() {
+  const head = view.state.selection.head; let current = null;
+  for (const h of headings) if (h.pos <= head) current = h;
+  for (const h of headings) h.button.classList.toggle('current', h === current);
+}
+
+/* ---------- Menus ---------- */
+function closeDropdown() {
+  menu.hidden = true; dropdownType = ''; menuAnchor = null;
+  container.querySelectorAll('.menuAnchor[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+const item = (label, action, extra = {}) => Object.assign({ label, action }, extra);
+const heading = label => ({ heading: label });
+const sep = { separator: true };
+function inTable(state) { const { $from } = state.selection; for (let d = $from.depth; d > 0; d--) if ($from.node(d).type.spec.tableRole === 'table') return true; return false; }
+function tableItems() {
+  const s = view.state;
+  return [heading('表格'), item('在上方插入行', () => run(T.addRowBefore)), item('在下方插入行', () => run(T.addRowAfter)),
+    item('在左侧插入列', () => run(T.addColumnBefore)), item('在右侧插入列', () => run(T.addColumnAfter)),
+    item('删除行', () => run(T.deleteRow)), item('删除列', () => run(T.deleteColumn)),
+    item('合并单元格', () => run(T.mergeCells), { disabled: !T.mergeCells(s) }), item('拆分单元格', () => run(T.splitCell), { disabled: !T.splitCell(s) }),
+    item('切换表头行', () => run(T.toggleHeaderRow)), item('删除表格', () => run(T.deleteTable), { danger: true })];
+}
+function menuEntries(type) {
+  const s = view.state;
+  switch (type) {
+    case 'import': return [item('导入单个文件…', () => $('fileInput').click(), { hint: 'Markdown、原生文稿、文本' }), item('导入文件夹…', () => $('folderInput').click(), { hint: 'Markdown 与本地图片' })];
+    case 'file': return [
+      item('新建文稿…', newDocument), sep,
+      item('导入单个文件…', () => $('fileInput').click(), { hint: 'Markdown、原生文稿、文本' }), item('导入文件夹…', () => $('folderInput').click(), { hint: 'Markdown 与本地图片' }), sep,
+      item('重命名…', () => renameDocument(docId)), item('创建副本', async () => { await save(); await duplicateDocument(docId); }), item('立即保存', () => save().then(ok => { if (ok) notify('已保存到我的文稿'); }), { key: 'Mod-s' }), sep,
+      item('下载原生文稿 (.kamodoc)', saveNative, { hint: '保留全部格式与插图' }), item('导出 Markdown (.md)', exportMd, { hint: '与文档工具互通' }), item('排版 / 导出 PDF', exportPdf), sep,
+      item('关闭文稿', closeDocument, { hint: '保存后返回我的文稿' })];
+    case 'edit': return [
+      item('撤销', () => run(undo), { key: 'Mod-z', disabled: !undoDepth(s) }), item('重做', () => run(redo), { key: 'Shift-Mod-z', disabled: !redoDepth(s) }), sep,
+      item('剪切', () => { view.focus(); document.execCommand('cut'); }, { key: 'Mod-x' }), item('复制', () => { view.focus(); document.execCommand('copy'); }, { key: 'Mod-c' }),
+      item('粘贴', () => notify((isMac ? '⌘' : 'Ctrl+') + 'V 粘贴：浏览器不允许菜单直接读取剪贴板'), { key: 'Mod-v' }), sep,
+      item('全选', () => run(PM.commands.selectAll), { key: 'Mod-a' }), item('查找和替换', () => openFind(true), { key: 'Shift-Mod-h' })];
+    case 'insert': return [
+      item('图片…', chooseImages, { hint: '从本机选择，可多选；也可直接粘贴或拖入' }), item('表格…', openTableDialog), item('链接…', openLinkDialog, { key: 'Mod-k' }),
+      item('卡谋语…', openInsert, { hint: '字素与拟素源码' }), item('公式（行内）', () => insertMath(false), { hint: '也可直接输入 $公式$' }), item('公式块', () => insertMath(true), { hint: '也可在空行输入 $$' }), sep, item('水平线', () => run(insertHr)), item('换行（不分段）', () => run(insertHardBreak), { key: 'Shift-Enter' })];
+    case 'format': {
+      const entries = [heading('文字'),
+        item('加粗', () => run(toggle('bold')), { key: 'Mod-b', checked: markActive(s, marks.bold) }), item('斜体', () => run(toggle('italic')), { key: 'Mod-i', checked: markActive(s, marks.italic) }),
+        item('下划线', () => run(toggle('underline')), { key: 'Mod-u', checked: markActive(s, marks.underline) }), item('删除线', () => run(toggle('strike')), { key: 'Shift-Mod-x', checked: markActive(s, marks.strike) }),
+        item('上标', () => run(toggle('sup')), { key: 'Mod-.', checked: markActive(s, marks.sup) }), item('下标', () => run(toggle('sub')), { key: 'Mod-,', checked: markActive(s, marks.sub) }),
+        item('行内代码', () => run(toggle('code')), { key: 'Mod-e', checked: markActive(s, marks.code) }),
+        item('增大字号', () => stepSize(1), { key: 'Shift-Mod-.' }), item('减小字号', () => stepSize(-1), { key: 'Shift-Mod-,' }),
+        heading('段落'), ...BLOCK_STYLES.slice(0, 4).map(([v, label, key]) => item(label, () => applyBlockStyle(v), { key, checked: currentBlockValue(s) === v })),
+        item('左对齐', () => run(setBlockAttr('align', null)), { key: 'Shift-Mod-l' }), item('居中', () => run(setBlockAttr('align', 'center')), { key: 'Shift-Mod-e' }),
+        item('右对齐', () => run(setBlockAttr('align', 'right')), { key: 'Shift-Mod-r' }), item('两端对齐', () => run(setBlockAttr('align', 'justify')), { key: 'Shift-Mod-j' }),
+        item('项目符号列表', () => run(toggleList(nodes.bullet_list)), { key: 'Shift-Mod-8' }), item('编号列表', () => run(toggleList(nodes.ordered_list)), { key: 'Shift-Mod-7' }),
+        item('增加缩进', () => run(changeIndent(1)), { key: 'Mod-]' }), item('减少缩进', () => run(changeIndent(-1)), { key: 'Mod-[' }),
+        sep, item('清除格式', () => run(clearFormatting), { key: 'Mod-\\' })];
+      if (inTable(s)) entries.push(...tableItems());
+      return entries;
+    }
+    case 'tools': return [item('字数统计', openCount, { key: 'Shift-Mod-c' }), item('查找和替换', () => openFind(true), { key: 'Shift-Mod-h' }), sep,
+      item('卡谋语输入法', () => setMode('kamo'), { checked: mode === 'kamo' }), item('系统输入法', () => setMode('native'), { checked: mode === 'native' }), sep,
+      item('显示文稿大纲', toggleSidebar, { checked: !layout.classList.contains('collapsed') }), item('键盘快捷键', openShortcuts, { key: 'Mod-/' })];
+    case 'block': return BLOCK_STYLES.map(([v, label]) => item(label, () => applyBlockStyle(v), { checked: currentBlockValue(s) === v, className: 'style-' + v }));
+    case 'font': { const cur = marksAtSelection(s, marks.fontFamily)[0]?.attrs.family || ''; return FONTS.map(([v, label, css]) => item(label, () => run(setMark(marks.fontFamily, v ? { family: v } : null)), { checked: fontKey(cur) === fontKey(v), fontCss: css })); }
+    case 'size': { const cur = selectionSizes(s); return SIZES.map(v => item(String(v), () => applySize(v), { checked: cur.length === 1 && cur[0] === v })); }
+    case 'lineHeight': { const cur = s.selection.$from.parent.attrs.lineHeight || ''; return [heading('行距'), ...LINE_HEIGHTS.map(([v, label]) => item(label, () => run(setBlockAttr('lineHeight', v || null)), { checked: cur === v }))]; }
+    case 'zoom': return [.5, .75, .9, 1, 1.25, 1.5, 2].map(z => item(Math.round(z * 100) + '%', () => setZoom(z), { checked: !automaticZoom && Math.abs(zoom - z) < .01 }))
+      .concat([item('适合宽度', () => { automaticZoom = true; localStorage.removeItem('kamotish-writer-zoom'); fitWidth(); }, { checked: automaticZoom })]);
+    case 'context': {
+      const entries = [item('剪切', () => { view.focus(); document.execCommand('cut'); }, { key: 'Mod-x', disabled: s.selection.empty }), item('复制', () => { view.focus(); document.execCommand('copy'); }, { key: 'Mod-c', disabled: s.selection.empty }),
+        sep, item('插入链接', openLinkDialog, { key: 'Mod-k' }), item('清除格式', () => run(clearFormatting), { key: 'Mod-\\' })];
+      return inTable(s) ? tableItems().concat([sep], entries) : entries;
+    }
+  }
+  return [];
+}
+function swatches(type) {
+  const box = document.createElement('div'), current = marksAtSelection(view.state, marks[type])[0]?.attrs.color;
+  const reset = document.createElement('button'); reset.className = 'menuItem swatchReset'; reset.textContent = type === 'color' ? '重置文字颜色' : '无突出显示';
+  reset.onclick = () => { closeDropdown(); run(setMark(marks[type], null)); }; box.append(reset);
+  const grid = document.createElement('div'); grid.className = 'swatchGrid';
+  for (const color of TEXT_COLORS) {
+    const b = document.createElement('button'); b.className = 'swatch' + (current === color ? ' on' : ''); b.style.background = color; b.title = color; b.setAttribute('aria-label', color);
+    b.onclick = () => { closeDropdown(); run(setMark(marks[type], { color })); }; grid.append(b);
+  }
+  const custom = document.createElement('label'); custom.className = 'swatchCustom';
+  custom.innerHTML = '<span>自定义</span><input type="text" placeholder="#1a73e8" maxlength="7" aria-label="自定义颜色">';
+  custom.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') { const v = e.target.value.trim(); if (/^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(v)) { closeDropdown(); run(setMark(marks[type], { color: v })); } else notify('请输入 #RRGGBB 格式的颜色'); } });
+  box.append(grid, custom); return box;
+}
+function openMenu(anchor, type, point) {
+  if (!menu.hidden && dropdownType === type && menuAnchor === anchor && !point) { closeDropdown(); return; }
+  closeTone(); stopIme(); closeDropdown(); dropdownType = type; menuAnchor = anchor;
+  anchor?.setAttribute('aria-expanded', 'true');
+  menu.replaceChildren(); menu.className = 'dropdown menu-' + type;
+  if (type === 'color' || type === 'highlight') menu.append(swatches(type));
+  else for (const entry of menuEntries(type)) {
+    if (entry.separator) { const s = document.createElement('div'); s.className = 'menuSeparator'; menu.append(s); continue; }
+    if (entry.heading) { const h = document.createElement('div'); h.className = 'menuHeading'; h.textContent = entry.heading; menu.append(h); continue; }
+    const b = document.createElement('button'); b.className = 'menuItem' + (entry.danger ? ' danger' : '') + (entry.className ? ' ' + entry.className : ''); b.setAttribute('role', 'menuitem'); b.disabled = !!entry.disabled;
+    b.innerHTML = `<span class="check">${entry.checked ? '✓' : ''}</span><span class="menuLabel">${safe(entry.label)}${entry.hint ? '<small>' + safe(entry.hint) + '</small>' : ''}</span>${entry.key ? '<kbd>' + safe(keyLabel(entry.key)) + '</kbd>' : ''}`;
+    if (entry.fontCss) b.querySelector('.menuLabel').style.fontFamily = entry.fontCss;
+    b.onmousedown = e => e.preventDefault();
+    b.onclick = () => { closeDropdown(); try { const r = entry.action(); r?.catch?.(e => notify(e.message)); } catch (e) { notify(e.message); } };
+    menu.append(b);
+  }
+  if (point) placeFixed(menu, { left: point.x, right: point.x, top: point.y, bottom: point.y }); else placeFixed(menu, anchor.getBoundingClientRect());
+}
+container.querySelectorAll('[data-menu]').forEach(b => {
+  b.addEventListener('mousedown', e => { if (b.id !== 'kw-fontSize') e.preventDefault(); });
+  b.addEventListener('click', e => { e.preventDefault(); openMenu(b, b.dataset.menu); });
+  // Like a desktop menubar: once a menu is open, hovering another top menu switches to it.
+  if (b.classList.contains('menubarItem')) b.addEventListener('mouseenter', () => { if (!menu.hidden && menuAnchor?.classList.contains('menubarItem') && menuAnchor !== b) openMenu(b, b.dataset.menu); });
+});
+menu.addEventListener('keydown', e => {
+  const btns = [...menu.querySelectorAll('button:not(:disabled)')], index = btns.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); btns[(index + (e.key === 'ArrowDown' ? 1 : btns.length - 1)) % btns.length]?.focus(); }
+  else if (e.key === 'Escape') { const anchor = menuAnchor; closeDropdown(); anchor ? anchor.focus() : view.focus(); }
+});
+function openContextMenu(e) {
+  if (!inTable(view.state)) return false;
+  const pos = view.posAtCoords({ left: e.clientX, top: e.clientY });
+  if (pos && view.state.selection.empty) view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos.pos)));
+  if (!inTable(view.state)) return false;
+  e.preventDefault(); openMenu(null, 'context', { x: e.clientX, y: e.clientY }); return true;
+}
+document.addEventListener('pointerdown', e => {
+  container.querySelectorAll('.document-actions[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
+  if (!e.target.closest('#kw-dropdown,.menuAnchor')) closeDropdown();
+  if (!e.target.closest('#kw-tonePicker,.kw-unit')) closeTone();
+  if (!e.target.closest('#kw-ime,#kw-editor')) stopIme();
+  if (mathPos != null && !e.target.closest('#kw-mathEditor')) closeMathEditor(true);
+});
+
+/* ---------- Toolbar actions ---------- */
+const ACTIONS = {
+  undo: () => run(undo), redo: () => run(redo), find: () => openFind(true), sizeUp: () => stepSize(1), sizeDown: () => stepSize(-1),
+  link: openLinkDialog, image: chooseImages, kamo: openInsert, math: () => insertMath(false), indent: () => run(changeIndent(1)), outdent: () => run(changeIndent(-1)), clearFormat: () => run(clearFormatting)
+};
+container.querySelectorAll('.tools button').forEach(b => {
+  if (!b.classList.contains('menuAnchor') && !b.closest('.inputSwitch')) b.addEventListener('mousedown', e => e.preventDefault());
+});
+container.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => ACTIONS[b.dataset.action]()));
+container.querySelectorAll('[data-mark]').forEach(b => b.addEventListener('click', () => run(toggle(b.dataset.mark))));
+container.querySelectorAll('[data-align]').forEach(b => b.addEventListener('click', () => run(setBlockAttr('align', b.dataset.align === 'left' ? null : b.dataset.align))));
+container.querySelectorAll('[data-list]').forEach(b => b.addEventListener('click', () => run(toggleList(nodes[b.dataset.list]))));
+$('fontSize').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); applySize(Number(e.target.value)); }
+  else if (e.key === 'Escape') { updateToolbar(); view.focus(); }
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); stepSize(e.key === 'ArrowUp' ? 1 : -1); $('fontSize').focus(); }
+});
+$('fontSize').addEventListener('focus', e => e.target.select());
+$('fontSize').addEventListener('change', e => { if (e.target.value.trim() && Number(e.target.value) !== selectionSizes(view.state)[0]) applySize(Number(e.target.value)); });
+$('fontSize').addEventListener('blur', () => setTimeout(updateToolbar));
+
+/* ---------- Links ---------- */
+function markRange(state, type, pos) {
+  const $pos = state.doc.resolve(pos), parent = $pos.parent;
+  let index = $pos.index(), mark = index < parent.childCount ? type.isInSet(parent.child(index).marks) : null;
+  if (!mark && $pos.textOffset === 0 && index > 0) { index--; mark = type.isInSet(parent.child(index).marks); }
+  if (!mark) return null;
+  let first = index, last = index + 1;
+  while (first > 0 && mark.isInSet(parent.child(first - 1).marks)) first--;
+  while (last < parent.childCount && mark.isInSet(parent.child(last).marks)) last++;
+  let from = $pos.start(); for (let i = 0; i < first; i++) from += parent.child(i).nodeSize;
+  let to = from; for (let i = first; i < last; i++) to += parent.child(i).nodeSize;
+  return { from, to, mark };
+}
+function plainSelection(state) {
+  const { from, to, $from, $to } = state.selection; let plain = $from.sameParent($to);
+  state.doc.nodesBetween(from, to, node => { if (node.isInline && !node.isText) plain = false; });
+  return plain;
+}
+function openLinkDialog() {
+  const state = view.state, { from, to, empty } = state.selection;
+  linkRange = markRange(state, marks.link, from); if (linkRange && to > linkRange.to) linkRange = null;
+  const range = linkRange || { from, to }, textField = $('linkText').closest('.field');
+  $('linkText').value = state.doc.textBetween(range.from, range.to, ' ', '\ufffc');
+  $('linkUrl').value = linkRange?.mark.attrs.href || '';
+  textField.hidden = !(empty || linkRange || plainSelection(state));
+  $('linkDialog').hidden = false; (!textField.hidden && !$('linkText').value ? $('linkText') : $('linkUrl')).focus();
+}
+$('linkCancel').onclick = () => { $('linkDialog').hidden = true; view.focus(); };
+$('linkForm').onsubmit = e => {
+  e.preventDefault();
+  let href = $('linkUrl').value.trim(); if (!href) return;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(href) && !/^[#/.]/.test(href) && /^[^\s]+\.[^\s]+$/.test(href)) href = (href.includes('@') && !href.includes('/') ? 'mailto:' : 'https://') + href;
+  href = M.safeLink(href); if (!href) return notify('不支持此链接地址');
+  const state = view.state, link = marks.link.create({ href }), text = $('linkText').value, tr = state.tr;
+  const range = linkRange || { from: state.selection.from, to: state.selection.to };
+  const current = state.doc.textBetween(range.from, range.to, ' ', '\ufffc');
+  const keep = (range.from === range.to ? state.storedMarks || state.selection.$from.marks() : state.doc.resolve(range.from + 1).marks()).filter(m => m.type !== marks.link && m.type !== marks.kamoRun);
+  let end = range.to;
+  if (range.from === range.to) { const t = text || href; tr.insert(range.from, schema.text(t, link.addToSet(keep))); end = range.from + t.length; }
+  else if (!$('linkText').closest('.field').hidden && text && text !== current) { tr.replaceWith(range.from, range.to, schema.text(text, link.addToSet(keep))); end = range.from + text.length; }
+  else tr.removeMark(range.from, range.to, marks.link).addMark(range.from, range.to, link);
+  tr.setSelection(TextSelection.create(tr.doc, end)).removeStoredMark(marks.link);
+  view.dispatch(tr); $('linkDialog').hidden = true; view.focus();
+};
+function updateLinkBubble() {
+  const bubble = $('linkBubble'), { selection } = view.state;
+  const range = view.hasFocus() && !composing && hasDocument ? markRange(view.state, marks.link, selection.from) : null;
+  if (!range || selection.to > range.to) { bubble.hidden = true; return; }
+  $('linkHref').textContent = range.mark.attrs.href; $('linkHref').href = range.mark.attrs.href;
+  const start = view.coordsAtPos(range.from), end = view.coordsAtPos(range.to);
+  placeFixed(bubble, { left: start.left, right: end.right, top: start.top, bottom: Math.max(start.bottom, end.bottom) });
+}
+$('linkBubble').addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') e.preventDefault(); });
+$('linkEdit').onclick = () => openLinkDialog();
+$('linkRemove').onclick = () => { const r = markRange(view.state, marks.link, view.state.selection.from); if (r) view.dispatch(view.state.tr.removeMark(r.from, r.to, marks.link)); view.focus(); };
+
+/* ---------- Find and replace ---------- */
+function setFind(meta) { view.dispatch(view.state.tr.setMeta(findKey, meta)); }
+function openFind(replace) {
+  const bar = $('findBar'); bar.hidden = false; bar.classList.toggle('withReplace', !!replace || bar.classList.contains('withReplace'));
+  const { from, to } = view.state.selection, selected = view.state.doc.textBetween(from, to, ' ');
+  if (selected && !selected.includes('\n') && selected.length < 100) $('findInput').value = selected;
+  $('findInput').focus(); $('findInput').select();
+  setFind({ query: $('findInput').value, caseSensitive: $('findCase').checked, index: 0 }); revealMatch();
+}
+function closeFind() { $('findBar').hidden = true; setFind({ query: '' }); view.focus(); }
+function revealMatch(select = false) {
+  const f = findKey.getState(view.state); const m = f.matches[f.index]; if (!m) return;
+  const dom = view.domAtPos(m.from).node; const el = dom.nodeType === 3 ? dom.parentElement : dom;
+  el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (select) { view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, m.from, m.to))); }
+}
+function stepMatch(delta) {
+  const f = findKey.getState(view.state); if (!f.matches.length) return;
+  setFind({ index: (f.index + delta + f.matches.length) % f.matches.length }); revealMatch();
+}
+function updateFindCount() {
+  if ($('findBar').hidden) return;
+  const f = findKey.getState(view.state);
+  $('findCount').textContent = f.query ? (f.matches.length ? `${f.index + 1} / ${f.matches.length}` : '无结果') : '';
+}
+$('findInput').addEventListener('input', () => { setFind({ query: $('findInput').value, index: 0 }); revealMatch(); });
+$('findCase').addEventListener('change', () => setFind({ caseSensitive: $('findCase').checked, index: 0 }));
+$('findInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); } else if (e.key === 'Escape') closeFind(); });
+$('replaceInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); replaceOne(); } else if (e.key === 'Escape') closeFind(); });
+$('findNext').onclick = () => stepMatch(1); $('findPrev').onclick = () => stepMatch(-1); $('findClose').onclick = closeFind;
+function replaceOne() {
+  const f = findKey.getState(view.state), m = f.matches[f.index]; if (!m) return;
+  const value = $('replaceInput').value, tr = view.state.tr;
+  if (value) tr.insertText(value, m.from, m.to); else tr.delete(m.from, m.to);
+  view.dispatch(tr); revealMatch();
+}
+function replaceAll() {
+  const f = findKey.getState(view.state); if (!f.matches.length) return;
+  const value = $('replaceInput').value, tr = view.state.tr;
+  for (const m of [...f.matches].reverse()) { if (value) tr.insertText(value, m.from, m.to); else tr.delete(m.from, m.to); }
+  view.dispatch(tr); notify(`已替换 ${f.matches.length} 处`);
+}
+$('replaceOne').onclick = replaceOne; $('replaceAll').onclick = replaceAll;
+
+/* ---------- Formulas ---------- */
+const MATH_TEMPLATES = [
+  ['\\frac{a}{b}', '\\frac{}{}', '分数'], ['x^{2}', '^{}', '上标'], ['x_{i}', '_{}', '下标'], ['\\sqrt{x}', '\\sqrt{}', '根号'], ['\\sqrt[n]{x}', '\\sqrt[]{}', 'n 次根'],
+  ['\\sum_{i=1}^{n}', '\\sum_{i=1}^{n} ', '求和'], ['\\prod_{i=1}^{n}', '\\prod_{i=1}^{n} ', '连乘'], ['\\int_{a}^{b}', '\\int_{}^{} \\,\\mathrm{d}x', '积分'], ['\\lim_{x\\to\\infty}', '\\lim_{x \\to } ', '极限'],
+  ['\\left(x\\right)', '\\left(  \\right)', '括号'], ['\\vec{v}', '\\vec{}', '向量'], ['\\hat{x}', '\\hat{}', '帽'], ['\\overline{x}', '\\overline{}', '上划线'],
+  ['\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}', '\\begin{pmatrix}  &  \\\\  &  \\end{pmatrix}', '矩阵'],
+  ['\\begin{cases}a\\\\b\\end{cases}', '\\begin{cases}  & x>0 \\\\  & x\\le 0 \\end{cases}', '分段'], ['\\text{文字}', '\\text{}', '文字']
+];
+const MATH_SYMBOLS = '\\alpha \\beta \\gamma \\delta \\epsilon \\theta \\lambda \\mu \\pi \\rho \\sigma \\phi \\omega \\Delta \\Sigma \\Omega \\infty \\pm \\times \\div \\cdot \\le \\ge \\ne \\approx \\equiv \\to \\Rightarrow \\Leftrightarrow \\in \\notin \\subset \\cup \\cap \\forall \\exists \\partial \\nabla \\degree \\ldots'.split(' ');
+let mathPos = null, mathCreated = false;
+function renderMath(el, tex, display) { try { katex.render(tex || '\\square', el, { throwOnError: false, displayMode: display }); } catch { el.textContent = tex; } }
+(function buildPalette() {
+  const box = $('mathPalette');
+  for (const [sample, insert, label] of MATH_TEMPLATES) { const b = document.createElement('button'); b.type = 'button'; b.title = label; b.dataset.insert = insert; renderMath(b, sample, false); box.append(b); }
+  const symbols = document.createElement('div'); symbols.className = 'mathSymbols';
+  for (const sym of MATH_SYMBOLS) { const b = document.createElement('button'); b.type = 'button'; b.title = sym; b.dataset.insert = sym + ' '; renderMath(b, sym, false); symbols.append(b); }
+  box.after(symbols);
+})();
+function openMathEditor(pos) {
+  const node = view.state.doc.nodeAt(pos); if (!node || (node.type !== nodes.math_inline && node.type !== nodes.math_display)) return;
+  closeDropdown(); closeTone(); stopIme();
+  mathPos = pos; mathCreated = !node.attrs.tex;
+  if (!(view.state.selection instanceof NodeSelection && view.state.selection.from === pos)) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+  const box = $('mathEditor'), src = $('mathSource');
+  box.classList.toggle('display', node.type === nodes.math_display);
+  src.value = node.attrs.tex; src.rows = node.type === nodes.math_display ? 3 : 1; updateMathPreview();
+  const dom = view.nodeDOM(pos); placeFixed(box, (dom || view.dom).getBoundingClientRect());
+  src.focus(); src.setSelectionRange(src.value.length, src.value.length);
+}
+function updateMathPreview() {
+  const node = mathPos != null && view.state.doc.nodeAt(mathPos);
+  renderMath($('mathPreview'), $('mathSource').value.replace(/^\$+|\$+$/g, ''), node?.type === nodes.math_display);
+}
+function closeMathEditor(commit) {
+  if (mathPos == null) return;
+  const pos = mathPos, node = view.state.doc.nodeAt(pos); mathPos = null; $('mathEditor').hidden = true;
+  if (!node || (node.type !== nodes.math_inline && node.type !== nodes.math_display)) return;
+  const tex = $('mathSource').value.trim().replace(/^\$+|\$+$/g, '').trim();
+  const tr = view.state.tr; let removed = false;
+  if (commit && tex) { if (tex !== node.attrs.tex) tr.setNodeMarkup(pos, null, { tex }); }
+  else if (!tex || (mathCreated && !node.attrs.tex)) { tr.delete(pos, pos + node.nodeSize); removed = true; }
+  const after = removed ? tr.mapping.map(pos) : pos + node.nodeSize;
+  tr.setSelection(PM.state.Selection.near(tr.doc.resolve(Math.min(after, tr.doc.content.size))));
+  view.dispatch(closeHistory(tr.scrollIntoView())); view.focus();
+}
+function insertMath(display) {
+  const state = view.state, { from, to, empty } = state.selection;
+  const tex = empty ? '' : state.doc.textBetween(from, to, ' ');
+  const node = (display ? nodes.math_display : nodes.math_inline).create({ tex });
+  const tr = state.tr.replaceSelectionWith(node);
+  let pos = null; tr.doc.nodesBetween(Math.max(0, tr.mapping.map(from, -1) - 2), Math.min(tr.doc.content.size, tr.mapping.map(from, -1) + 3), (n, p) => { if (pos == null && n.type === node.type && n.attrs.tex === tex) pos = p; });
+  if (pos == null) return;
+  view.dispatch(closeHistory(tr.setSelection(NodeSelection.create(tr.doc, pos))));
+  openMathEditor(pos);
+}
+$('mathSource').addEventListener('input', () => {
+  updateMathPreview();
+  // Typing the closing $$ (or $) finishes the formula, as in Markdown.
+  if (/\$\$\s*$/.test($('mathSource').value) && $('mathSource').value.replace(/^\$+/, '').trim().length > 2) closeMathEditor(true);
+});
+$('mathSource').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); closeMathEditor(true); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMathEditor(false); }
+});
+container.querySelector('.mathPaletteWrap').addEventListener('mousedown', e => e.preventDefault());
+container.querySelector('.mathPaletteWrap').addEventListener('click', e => {
+  const b = e.target.closest('[data-insert]'); if (!b) return;
+  const src = $('mathSource'), text = b.dataset.insert, start = src.selectionStart, end = src.selectionEnd;
+  src.setRangeText(text, start, end, 'end');
+  const hole = text.indexOf('{}'), inner = text.indexOf('{ }');
+  if (hole >= 0) src.setSelectionRange(start + hole + 1, start + hole + 1);
+  else if (text.includes('  ')) { const p = start + text.indexOf('  ') + 1; src.setSelectionRange(p, p); }
+  src.focus(); updateMathPreview();
+});
+$('mathDone').onclick = () => closeMathEditor(true);
+$('mathDelete').onclick = () => { $('mathSource').value = ''; closeMathEditor(true); };
+
+/* ---------- Dialogs ---------- */
+function openCount() {
+  const all = M.countText(view.state.doc), { from, to, empty } = view.state.selection, part = empty ? null : M.countText(view.state.doc, from, to);
+  const row = (label, key) => `<tr><th>${label}</th>${part ? `<td>${part[key].toLocaleString('zh-CN')}</td>` : ''}<td>${all[key].toLocaleString('zh-CN')}</td></tr>`;
+  $('countTable').innerHTML = (part ? '<tr><th></th><td class="muted">所选</td><td class="muted">全文</td></tr>' : '') +
+    row('字数（汉字、单词、卡谋语各计 1）', 'words') + row('字符数（不含空格）', 'chars') + row('字符数（含空格）', 'charsWithSpaces') + row('卡谋语字素 / 拟素', 'units') + row('公式', 'formulas') + row('段落', 'paragraphs');
+  $('countDialog').hidden = false; $('countClose').focus();
+}
+$('countClose').onclick = () => { $('countDialog').hidden = true; view.focus(); };
+$('counter').onclick = openCount;
+function openShortcuts() {
+  const groups = [['常用', [['撤销 / 重做', 'Mod-z', 'Shift-Mod-z'], ['保存', 'Mod-s'], ['查找 / 替换', 'Mod-f', 'Shift-Mod-h'], ['字数统计', 'Shift-Mod-c'], ['插入链接', 'Mod-k'], ['换行（不分段）', 'Shift-Enter']]],
+    ['文字', [['加粗', 'Mod-b'], ['斜体', 'Mod-i'], ['下划线', 'Mod-u'], ['删除线', 'Shift-Mod-x'], ['上标 / 下标', 'Mod-.', 'Mod-,'], ['行内代码', 'Mod-e'], ['增大 / 减小字号', 'Shift-Mod-.', 'Shift-Mod-,'], ['清除格式', 'Mod-\\']]],
+    ['段落', [['正文 / 标题 1–3', 'Mod-Alt-0', 'Mod-Alt-1'], ['左 / 中 / 右 / 两端对齐', 'Shift-Mod-l', 'Shift-Mod-e'], ['编号 / 项目符号列表', 'Shift-Mod-7', 'Shift-Mod-8'], ['增加 / 减少缩进', 'Mod-]', 'Mod-['], ['列表内缩进', 'Tab', 'Shift-Tab']]],
+    ['自动格式', [['# 空格 → 标题；- 空格 → 列表；1. 空格 → 编号；> 空格 → 引用；--- → 水平线'], ['$公式$ → 行内公式；空行输入 $$ → 公式块；单击公式可编辑']]],
+    ['卡谋语输入', [['输入拼音后 1–4 选声调；← → 候选；↑ ↓ 翻页；空格/Enter 确认'], ['选中字素后按 1–4 修改声调']]]];
+  $('shortcutList').innerHTML = groups.map(([title, rows]) => `<h3>${title}</h3><dl>${rows.map(([label, ...keys]) => `<dt>${safe(label)}</dt><dd>${keys.map(k => '<kbd>' + safe(keyLabel(k)) + '</kbd>').join(' ')}</dd>`).join('')}</dl>`).join('');
+  $('shortcutDialog').hidden = false; $('shortcutClose').focus();
+}
+$('shortcutClose').onclick = () => { $('shortcutDialog').hidden = true; view.focus(); };
+function sourceValue() { const value = $('kamoSource').value.trim(); return value.startsWith('\\kamotish{') && value.endsWith('}') ? value.slice('\\kamotish{'.length, -1) : value; }
+function openInsert() { $('kamoDialog').hidden = false; $('kamoSource').value = '\\mi\\wou\\3中国人\\mou\\2'; updatePreview(); $('kamoSource').focus(); $('kamoSource').select(); }
+function updatePreview() { $('sourcePreview').innerHTML = Kamotish.renderInline(sourceValue()); }
+$('kamoSource').addEventListener('input', updatePreview);
+$('kamoSource').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('kamoForm').requestSubmit(); } });
+$('cancelInsert').onclick = () => { $('kamoDialog').hidden = true; view.focus(); };
+$('kamoForm').onsubmit = e => { e.preventDefault(); const s = sourceValue(); $('kamoDialog').hidden = true; view.focus(); if (s) insertSource(s); };
+for (const id of ['kamoDialog', 'linkDialog', 'countDialog', 'shortcutDialog', 'tableDialog']) $(id).addEventListener('pointerdown', e => { if (e.target === $(id)) { $(id).hidden = true; view.focus(); } });
+
+// Table dialog: a Docs-like size grid plus explicit numbers.
+const grid = $('tableGrid');
+for (let r = 1; r <= 8; r++) for (let c = 1; c <= 10; c++) { const cell = document.createElement('span'); cell.dataset.r = r; cell.dataset.c = c; grid.append(cell); }
+function paintGrid(rows, cols) { for (const cell of grid.children) cell.classList.toggle('on', cell.dataset.r <= rows && cell.dataset.c <= cols); }
+grid.addEventListener('mouseover', e => { const c = e.target.dataset; if (c.r) { $('tableRows').value = c.r; $('tableColumns').value = c.c; paintGrid(c.r, c.c); } });
+grid.addEventListener('click', e => { if (e.target.dataset.r) $('tableForm').requestSubmit(); });
+for (const id of ['tableRows', 'tableColumns']) $(id).addEventListener('input', () => paintGrid($('tableRows').value, $('tableColumns').value));
+function openTableDialog() { insertionTarget = docId; $('tableDialog').hidden = false; paintGrid($('tableRows').value, $('tableColumns').value); $('tableRows').focus(); }
+$('tableCancel').onclick = () => { $('tableDialog').hidden = true; view.focus(); };
+$('tableForm').onsubmit = e => {
+  e.preventDefault(); if (!hasDocument || insertionTarget !== docId) return;
+  const rows = Number($('tableRows').value), cols = Number($('tableColumns').value);
+  if (!Number.isInteger(rows) || rows < 1 || rows > 30 || !Number.isInteger(cols) || cols < 1 || cols > 12) return notify('表格最多 30 行、12 列');
+  const header = $('tableHeader').checked, cell = type => type.create(null, nodes.paragraph.create());
+  const table = nodes.table.create(null, Array.from({ length: rows }, (_, r) => nodes.table_row.create(null, Array.from({ length: cols }, () => cell(r === 0 && header ? nodes.table_header : nodes.table_cell)))));
+  $('tableDialog').hidden = true;
+  const state = view.state, tr = state.tr.replaceSelectionWith(table);
+  // Put the caret in the first cell.
+  let cellPos = null; tr.doc.nodesBetween(tr.mapping.map(state.selection.from, -1), tr.doc.content.size, (node, pos) => { if (cellPos == null && node.type.spec.tableRole === 'cell') { cellPos = pos; return false; } return cellPos == null; });
+  if (cellPos != null) tr.setSelection(TextSelection.create(tr.doc, cellPos + 2));
+  view.dispatch(tr.scrollIntoView()); view.focus();
+};
+function chooseImages() { insertionTarget = docId; $('imageInput').click(); }
+$('imageInput').onchange = async e => {
+  const target = insertionTarget, files = [...e.target.files]; e.target.value = '';
+  if (files.some(f => !/^image\//.test(f.type))) return notify('插入图片失败: 请选择图片文件');
+  if (!hasDocument || docId !== target) return notify('当前文稿已切换，已取消插入图片');
+  await insertImageFiles(files);
+};
+
+/* ---------- Zoom and sidebar ---------- */
+// CSS layout zoom (not a transform): caret, selection and popup coordinates stay correct.
+function setZoom(z, persist = true) {
+  zoom = Math.min(2, Math.max(.5, Math.round(z * 100) / 100)); container.style.setProperty('--doc-zoom', String(zoom));
+  $('zoomLevel').firstChild.textContent = Math.round(zoom * 100) + '% ';
+  if (persist) { automaticZoom = false; localStorage.setItem('kamotish-writer-zoom', String(zoom)); }
+  requestAnimationFrame(() => { drawCaret(); placeIme(); updateLinkBubble(); });
+}
+workspace.addEventListener('wheel', e => { if (e.ctrlKey) { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * .01)); } }, { passive: false });
+let gestureBase = 1;
+workspace.addEventListener('gesturestart', e => { e.preventDefault(); gestureBase = zoom; }, { passive: false });
+workspace.addEventListener('gesturechange', e => { e.preventDefault(); setZoom(gestureBase * e.scale); }, { passive: false });
+workspace.addEventListener('gestureend', e => e.preventDefault(), { passive: false });
+workspace.addEventListener('scroll', () => { placeIme(); drawCaret(); updateLinkBubble(); if (!$('tonePicker').hidden) closeTone(); if (mathPos != null) { const d = view.nodeDOM(mathPos); if (d) placeFixed($('mathEditor'), d.getBoundingClientRect()); } }, { passive: true });
+window.addEventListener('resize', () => { placeIme(); drawCaret(); if (!container.hidden) fitWidth(); });
+function toggleSidebar() {
+  if (matchMedia('(max-width:760px)').matches) { const opened = layout.classList.toggle('outline-open'); layout.classList.remove('collapsed'); $('sideToggle').setAttribute('aria-expanded', String(opened)); return; }
+  const collapsed = layout.classList.toggle('collapsed'); $('sideToggle').setAttribute('aria-expanded', String(!collapsed));
+  localStorage.setItem('kamotish-writer-sidebar', collapsed ? 'hidden' : 'visible'); setTimeout(fitWidth);
+}
+$('sideToggle').onclick = toggleSidebar; $('outlineOpen').onclick = toggleSidebar;
+function fitWidth() { if (automaticZoom && workspace.clientWidth) setZoom(Math.min(1, (workspace.clientWidth - 48) / 794), false); }
+try { const savedZoom = localStorage.getItem('kamotish-writer-zoom'); if (savedZoom) setZoom(Number(savedZoom)); } catch { zoom = 1; }
+if (localStorage.getItem('kamotish-writer-sidebar') === 'hidden') { layout.classList.add('collapsed'); $('sideToggle').setAttribute('aria-expanded', 'false'); }
+
+container.addEventListener('keydown', e => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); if (hasDocument) save().then(ok => { if (ok) notify('已保存到我的文稿'); }); return; }
+  if (mod && ['+', '=', '-', '0'].includes(e.key) && view.hasFocus()) { e.preventDefault(); setZoom(e.key === '0' ? 1 : zoom + (e.key === '-' ? -.1 : .1)); return; }
+  if (mod && e.key.toLowerCase() === 'f' && hasDocument && !view.hasFocus() && !e.target.closest('.modal')) { e.preventDefault(); openFind(false); return; }
+  if (e.key === 'Escape') {
+    if (composing) stopIme(); closeTone(); if (!menu.hidden) { closeDropdown(); view.focus(); }
+    for (const id of ['kamoDialog', 'tableDialog', 'nameDialog', 'deleteDialog', 'linkDialog', 'countDialog', 'shortcutDialog', 'folderDialog']) if (!$(id).hidden) { $(id).hidden = true; if (hasDocument) view.focus(); }
+  }
+});
+
+/* ---------- Saving, import and export ---------- */
+function changed() {
+  clearTimeout(outlineTimer); outlineTimer = setTimeout(refreshOutline, 120);
+  if (!hasDocument || loadingDocument) return;
+  revision++; $('saveStatus').textContent = '正在编辑…'; clearTimeout(saveTimer); saveTimer = setTimeout(() => save(), 450);
+}
+$('docTitle').addEventListener('input', changed);
+$('docTitle').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); view.focus(); } });
+function setDoc(doc) {
+  view.updateState(newState(doc)); stopIme(); closeTone(); closeDropdown();
+  if (!$('findBar').hidden) setFind({ query: $('findInput').value, caseSensitive: $('findCase').checked, index: 0 });
+  refreshOutline(); updateToolbar(); drawCaret();
+}
+function exportNative() { return { format: 'Kamotish Writer', schemaVersion: 2, id: docId, title: $('docTitle').value, createdBy: 'Kamotish Writer 3', savedAt: new Date().toISOString(), page: { size: 'A4' }, content: M.docToAst(view.state.doc) }; }
+function importNative(doc) {
+  if (doc?.format !== 'Kamotish Writer' || doc.schemaVersion !== 2 || !Array.isArray(doc.content)) throw Error('不是支持的 .kamodoc 文档 (需要版本 2)');
+  if (doc.content.length > 100000) throw Error('文档节点数量异常');
+  setDoc(M.astToDoc(doc.content)); $('docTitle').value = String(doc.title || '未命名文稿'); docId = String(doc.id || docId); changed();
+}
+function saveNative() { download(filename() + '.kamodoc', JSON.stringify(exportNative(), null, 2), 'application/vnd.kamotish-writer+json;charset=utf-8'); notify('原生 .kamodoc 文稿已导出'); }
+function exportMarkdown() { return M.docToMarkdown(view.state.doc); }
+function exportMd() { download(filename() + '.md', exportMarkdown(), 'text/markdown;charset=utf-8'); notify('Markdown 已导出'); }
+function exportPdf() { deactivate(); options.onExport?.(exportDocument()); }
+$('pdfBtn').onclick = exportPdf;
+const markdown = window.markdownit({ html: true, linkify: true }).use(window.markdownitKamotish, Kamotish);
+markdown.renderer.rules.kamotish = (tokens, i) => M.runElement(tokens[i].content).outerHTML;
+// Formulas import as editable nodes: the texmath rules give the TeX source, not finished HTML.
+if (window.texmath && window.katex) {
+  markdown.use(window.texmath, { engine: window.katex, delimiters: ['dollars', 'brackets'] });
+  for (const name of Object.keys(markdown.renderer.rules).filter(n => n.startsWith('math_'))) {
+    const display = !/^math_inline(_bracket)?$/.test(name);
+    markdown.renderer.rules[name] = (tokens, i) => M.mathElement(tokens[i].content.trim(), display, false).outerHTML;
+  }
+  const fence = markdown.renderer.rules.fence;
+  markdown.renderer.rules.fence = (tokens, i, ...rest) => ['latex', 'tex', 'math', 'katex'].includes((tokens[i].info || '').trim().toLowerCase()) ? M.mathElement(tokens[i].content.trim(), true, false).outerHTML : fence(tokens, i, ...rest);
+}
+function importMarkdown(source, { imageSources, documentPath } = {}) {
+  const dom = new DOMParser().parseFromString(markdown.render(source), 'text/html');
+  dom.querySelectorAll('script,style,iframe,object,embed,form,input,button').forEach(e => e.remove());
+  dom.querySelectorAll('img').forEach(img => {
+    const src = img.getAttribute('src') || ''; img.dataset.originalSrc = src;
+    if (imageSources && !/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) {
+      const key = new URL(src, new URL(documentPath || '', 'https://kamotish.invalid/')).pathname;
+      if (Object.prototype.hasOwnProperty.call(imageSources, key)) img.src = imageSources[key];
+    }
+  });
+  setDoc(M.domToDoc(dom.body)); changed();
+}
+async function openMarkdown(d) {
+  await ready; if (hasDocument && !(await save())) throw Error('当前文稿尚未保存，未切换文稿');
+  loadingDocument = true; hasDocument = true; deactivate(); docId = d.writerId || crypto.randomUUID(); createdAt = new Date().toISOString();
+  if (d.writerId) { const previous = await KamotishLibrary.get(d.writerId); if (previous) createdAt = previous.createdAt; }
+  openedDocument = d; importMarkdown(d.md, d); $('docTitle').value = d.name.replace(/\.(md|markdown)$/i, '');
+  baseline = JSON.stringify(exportNative().content) + $('docTitle').value; revision = 1; savedRevision = 0; loadingDocument = false;
+  showDocument(); await save(true); notify('文稿已载入');
+}
+$('folderCancel').onclick = () => { $('folderDialog').hidden = true; };
+$('folderInput').onchange = async e => {
+  try {
+    const docs = await window.KamotishFiles.readEntries([...e.target.files].map(file => ({ file, path: file.webkitRelativePath || file.name })));
+    if (!docs.length) throw Error('文件夹中没有 Markdown 文档');
+    const list = $('folderFiles'); list.replaceChildren();
+    for (const d of docs) { const b = document.createElement('button'); b.textContent = decodeURIComponent(d.documentPath); b.onclick = async () => { try { await openMarkdown(d); $('folderDialog').hidden = true; } catch (e) { notify(e.message); } }; list.append(b); }
+    $('folderDialog').hidden = false;
+  } catch (ex) { notify('导入失败: ' + ex.message); } finally { e.target.value = ''; }
+};
+$('fileInput').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    if (f.size > 60 * 1024 * 1024) throw Error('文件过大 (上限 60 MB)');
+    const src = await f.text();
+    if (/\.kamodoc$/i.test(f.name)) await openNativeDocument(JSON.parse(src));
+    else if (/\.html?$/i.test(f.name)) { const dom = new DOMParser().parseFromString(src, 'text/html'); dom.querySelectorAll('script,style,iframe,object,embed').forEach(x => x.remove()); await openMarkdown({ name: f.name, md: dom.body.textContent }); }
+    else await openMarkdown({ name: f.name, md: src });
+  } catch (ex) { notify('导入失败: ' + ex.message); }
+  e.target.value = '';
+};
+async function save(force = false) {
+  clearTimeout(saveTimer); if (!hasDocument || loadingDocument || (!force && revision === savedRevision)) return true;
+  const id = docId, version = revision, source = openedDocument ? { name: openedDocument.name, md: openedDocument.md, documentPath: openedDocument.documentPath, writerId: id } : null;
+  const record = { id, title: $('docTitle').value || '未命名文稿', createdAt, updatedAt: new Date().toISOString(), document: exportNative(), source, baseline };
+  $('saveStatus').textContent = '正在保存…';
+  const result = saveQueue.then(() => KamotishLibrary.put(record)); saveQueue = result.catch(() => {});
+  try {
+    await result;
+    if (hasDocument && docId === id) { savedRevision = Math.max(savedRevision, version); $('saveStatus').textContent = revision === savedRevision ? '已保存到此浏览器' : '正在编辑…'; }
+    return true;
+  } catch (e) { if (docId === id) $('saveStatus').textContent = '保存失败 · 请下载备份'; notify('文稿保存失败: ' + e.message); return false; }
+}
+function restoreDoc() {
+  try { const raw = localStorage.getItem('kamotish-writer-v2'); if (raw) { importNative(JSON.parse(raw)); return true; } } catch (e) { console.warn('Native recovery failed:', e); }
+  try {
+    const v1 = JSON.parse(localStorage.getItem('kamotish-writer-v1'));
+    if (v1 && typeof v1.html === 'string' && typeof v1.title === 'string') {
+      const dom = new DOMParser().parseFromString(v1.html, 'text/html');
+      dom.querySelectorAll('script,style,iframe,object,embed,form,input,button').forEach(x => x.remove());
+      setDoc(M.domToDoc(dom.body)); $('docTitle').value = v1.title; notify('已迁移旧版文稿; 建议导出 .kamodoc 备份'); return true;
+    }
+  } catch (e) { console.warn('v1 recovery failed:', e); }
+  return false;
+}
+function showDocument() {
+  $('libraryView').hidden = true; $('documentView').hidden = false;
+  workspace.scrollTop = 0; fitWidth();
+  view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)));
+  requestAnimationFrame(() => view.focus());
+}
+
+/* ---------- Library ---------- */
+async function refreshLibrary() { libraryRecords = await KamotishLibrary.list(); renderLibrary(); }
+function renderLibrary() {
+  const term = $('librarySearch').value.trim().toLocaleLowerCase();
+  const records = libraryRecords.filter(d => d.title.toLocaleLowerCase().includes(term));
+  records.sort($('librarySort').value === 'title' ? (a, b) => a.title.localeCompare(b.title, 'zh') : (a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  $('libraryCount').textContent = libraryRecords.length + ' 份文稿';
+  $('libraryStatus').textContent = records.length ? '' : term ? '没有找到匹配的文稿' : '还没有文稿。新建一份，或从“导入”菜单导入已有文档。';
+  const list = $('libraryList'); list.replaceChildren();
+  for (const record of records) {
+    const row = document.createElement('div'); row.className = 'library-row'; row.dataset.documentId = record.id;
+    const open = document.createElement('button'); open.className = 'library-open';
+    open.innerHTML = '<span class="document-symbol" aria-hidden="true">▤</span><span><strong>' + safe(record.title) + '</strong><small>' + safe(new Date(record.updatedAt).toLocaleString('zh-CN')) + ' 修改</small></span>';
+    open.onclick = () => openSavedDocument(record.id).catch(e => notify(e.message));
+    const more = document.createElement('details'); more.className = 'document-actions';
+    const summary = document.createElement('summary'); summary.textContent = '⋯'; summary.setAttribute('aria-label', record.title + '的操作'); more.append(summary);
+    const actions = document.createElement('div'); actions.className = 'document-action-menu';
+    for (const [label, action] of [['重命名', () => renameDocument(record.id)], ['创建副本', () => duplicateDocument(record.id)], ['删除', () => requestDelete(record)]]) {
+      const button = document.createElement('button'); button.textContent = label; if (label === '删除') button.className = 'danger';
+      button.onclick = () => { more.open = false; try { action()?.catch?.(e => notify(e.message)); } catch (e) { notify(e.message); } }; actions.append(button);
+    }
+    more.append(actions); row.append(open, more); list.append(row);
+  }
+}
+function askName(headingText, value, action) {
+  nameAction = action; $('nameHeading').textContent = headingText; $('nameInput').value = value; $('nameDialog').hidden = false;
+  $('nameInput').focus(); $('nameInput').select();
+}
+$('nameCancel').onclick = () => { $('nameDialog').hidden = true; nameAction = null; if (hasDocument) view.focus(); };
+$('nameForm').onsubmit = async e => {
+  e.preventDefault(); const name = $('nameInput').value.trim(); if (!name) return;
+  const submit = $('nameForm').querySelector('[type="submit"]'); submit.disabled = true;
+  try { await nameAction?.(name); $('nameDialog').hidden = true; nameAction = null; } catch (error) { notify(error.message); } finally { submit.disabled = false; }
+};
+function newDocument() { askName('新建文稿', '未命名文稿', name => openNativeDocument({ format: 'Kamotish Writer', schemaVersion: 2, title: name, content: [{ t: 'element', tag: 'p', children: [] }] })); }
+async function openNativeDocument(document) {
+  await ready; if (hasDocument && !(await save())) throw Error('当前文稿尚未保存，未切换文稿');
+  if (document?.format !== 'Kamotish Writer' || document.schemaVersion !== 2 || !Array.isArray(document.content) || document.content.length > 100000) throw Error('不是支持的 .kamodoc 文稿');
+  loadingDocument = true; hasDocument = true; deactivate(); openedDocument = null; baseline = ''; createdAt = new Date().toISOString();
+  importNative(Object.assign({}, document, { id: crypto.randomUUID() })); revision = 1; savedRevision = 0; loadingDocument = false; showDocument(); await save(true);
+}
+async function openSavedDocument(id) {
+  await ready; if (hasDocument && !(await save())) throw Error('当前文稿尚未保存，未切换文稿');
+  const record = await KamotishLibrary.get(id); if (!record) throw Error('这份文稿已不存在');
+  loadingDocument = true; hasDocument = true; deactivate(); openedDocument = record.source; baseline = record.baseline || ''; createdAt = record.createdAt;
+  importNative(record.document); revision = 0; savedRevision = 0; loadingDocument = false; $('saveStatus').textContent = '已保存到此浏览器'; showDocument();
+}
+async function closeDocument() {
+  if (hasDocument) { if (!(await save())) return; options.onDocumentClosed?.(exportDocument()); }
+  clearTimeout(saveTimer); hasDocument = false; openedDocument = null; deactivate();
+  $('documentView').hidden = true; $('libraryView').hidden = false; setDoc(M.emptyDoc());
+  await refreshLibrary();
+}
+async function renameDocument(id) {
+  const record = id === docId && hasDocument ? { title: $('docTitle').value } : await KamotishLibrary.get(id);
+  if (!record) throw Error('文稿已不存在');
+  askName('重命名文稿', record.title, async title => {
+    if (hasDocument && docId === id) { $('docTitle').value = title; changed(); await save(); }
+    else {
+      const stored = await KamotishLibrary.get(id), unchanged = stored.source && stored.baseline === JSON.stringify(stored.document.content) + stored.document.title;
+      stored.title = title; stored.document.title = title; stored.updatedAt = new Date().toISOString();
+      if (stored.source) { stored.source.name = title + '.md'; stored.baseline = unchanged ? JSON.stringify(stored.document.content) + title : ''; }
+      await KamotishLibrary.put(stored);
+    }
+    options.onDocumentRenamed?.(id, title); await refreshLibrary();
+  });
+}
+async function duplicateDocument(id) {
+  const record = await KamotishLibrary.get(id); if (!record) throw Error('文稿已不存在');
+  const unchanged = record.source && record.baseline === JSON.stringify(record.document.content) + record.document.title;
+  record.id = crypto.randomUUID(); record.title += '（副本）'; record.createdAt = record.updatedAt = new Date().toISOString(); record.document.id = record.id; record.document.title = record.title;
+  if (record.source) { record.source.name = record.title + '.md'; record.source.writerId = record.id; record.baseline = unchanged ? JSON.stringify(record.document.content) + record.title : ''; }
+  await KamotishLibrary.put(record); await refreshLibrary(); notify('已创建副本“' + record.title + '”');
+}
+function requestDelete(record) { deleteTarget = record.id; $('deleteMessage').textContent = '将从此浏览器的文稿库中删除“' + record.title + '”。已下载的文件不会受影响。'; $('deleteDialog').hidden = false; $('deleteCancel').focus(); }
+$('deleteCancel').onclick = () => { $('deleteDialog').hidden = true; deleteTarget = null; };
+$('deleteConfirm').onclick = async () => {
+  if (!deleteTarget) return;
+  try { await KamotishLibrary.remove(deleteTarget); options.onDocumentDeleted?.(deleteTarget); $('deleteDialog').hidden = true; deleteTarget = null; await refreshLibrary(); notify('文稿已删除'); } catch (e) { notify(e.message); }
+};
+$('librarySearch').oninput = renderLibrary; $('librarySort').onchange = renderLibrary;
+$('newDocument').onclick = newDocument; $('backToLibrary').onclick = () => closeDocument().catch(e => notify(e.message));
+async function initializeLibrary() {
+  try {
+    if (!(await KamotishLibrary.meta('legacy-migrated'))) {
+      loadingDocument = true;
+      if (restoreDoc()) {
+        const native = exportNative(), now = new Date().toISOString();
+        await KamotishLibrary.put({ id: native.id, title: native.title || '恢复的文稿', createdAt: now, updatedAt: now, document: native, source: null, baseline: '' });
+      }
+      await KamotishLibrary.setMeta('legacy-migrated', true); loadingDocument = false;
+    }
+    setDoc(M.emptyDoc()); hasDocument = false; await refreshLibrary();
+  } catch (e) { loadingDocument = false; $('libraryStatus').textContent = '无法打开本地文稿库: ' + e.message; throw e; }
+}
+
+const ready = initializeLibrary();
+window.addEventListener('pagehide', () => save());
+window.addEventListener('beforeunload', e => { if (hasDocument && revision !== savedRevision) { e.preventDefault(); e.returnValue = ''; } });
+function deactivate() {
+  visualCaret.hidden = true; stopIme(); closeTone(); closeDropdown(); $('linkBubble').hidden = true; if (mathPos != null) closeMathEditor(true);
+  for (const id of ['kamoDialog', 'folderDialog', 'tableDialog', 'linkDialog', 'countDialog', 'shortcutDialog']) $(id).hidden = true;
+}
+function exportDocument() {
+  if (!hasDocument) return null;
+  const name = filename() + '.md', documentPath = openedDocument?.documentPath || '/' + encodeURIComponent(name);
+  const unchanged = openedDocument && baseline === JSON.stringify(exportNative().content) + $('docTitle').value;
+  const imageSources = Object.assign(Object.create(null), openedDocument?.imageSources);
+  view.state.doc.descendants(node => {
+    if (node.type !== nodes.image) return;
+    const src = node.attrs.originalSrc || node.attrs.src;
+    if (src && !/^[a-z][a-z0-9+.-]*:/i.test(src) && node.attrs.src.startsWith('data:image/')) {
+      imageSources[new URL(src, new URL(documentPath, 'https://kamotish.invalid/')).pathname] = node.attrs.src;
+    }
+  });
+  return { writerId: docId, name: unchanged ? openedDocument.name : name, md: unchanged ? openedDocument.md : exportMarkdown(), documentPath, imageSources };
+}
+return {
+  ready, view, openMarkdown, exportDocument, exportNative, importNative, exportMarkdown, deactivate, save, closeDocument, newDocument, openSavedDocument, insertSource,
+  hasDocument: () => hasDocument,
+  activate() { if (!hasDocument) refreshLibrary().catch(e => notify(e.message)); fitWidth(); if (matchMedia('(max-width:760px)').matches) $('sideToggle').setAttribute('aria-expanded', String(layout.classList.contains('outline-open'))); }
+};
 } };

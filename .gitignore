@@ -5,3 +5,6 @@ __pycache__/
 .claude/
 web/_parity.html
 _site/
+# Rime Ice dictionary (GPL-3.0), built by writer/scripts/build_rime_ice.py and the Pages workflow
+writer/data/rime-ice/
+writer/data/rime-index.json

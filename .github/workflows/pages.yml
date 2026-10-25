@@ -35,6 +35,7 @@ jobs:
         run: |
           node --check site/app.js
           node --check writer/app.js
+          node --check writer/model.js
           node --check writer/storage.js
           node --check web/kamotish-files.js
           node writer/tests/test_ime.cjs

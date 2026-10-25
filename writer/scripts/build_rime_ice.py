@@ -15,6 +15,7 @@ from pathlib import Path
 BASE = 'https://raw.githubusercontent.com/iDvel/rime-ice/{ref}/cn_dicts/{filename}.dict.yaml'
 FILES = ('8105', 'base', 'ext', 'others')  # all have explicit reading for relevant entries
 VALID_CODE = re.compile(r'^[a-zvü ]+$')
+SINGLE = set()  # readings that are one syllable, filled while parsing
 
 
 def parse_lines(raw, name):
@@ -49,6 +50,8 @@ def parse_lines(raw, name):
                 weight = int(float(cells[2].split('#')[0].strip()))
             except (ValueError, OverflowError):
                 pass
+        if len(sylls) == 1:
+            SINGLE.add(sylls[0])
         yield (''.join(sylls), word, max(1, weight))
 
 
@@ -70,8 +73,10 @@ def compile_dict(texts, dest, minimum=0):
     kept = 0
     for key, words in groups.items():
         # Different files use different absolute weight ranges. Sort by relative weight per code.
-        # Keep 12 candidates per reading to bound download and parse time.
-        top = sorted(words.items(), key=lambda x: (-x[1], len(x[0]), x[0]))[:12]
+        # Bound download and parse time: a single syllable keeps more characters (common
+        # readings such as shi have dozens of everyday characters); phrases keep 12.
+        limit = 48 if key in SINGLE else 12
+        top = sorted(words.items(), key=lambda x: (-x[1], len(x[0]), x[0]))[:limit]
         shards[key[0]][key] = [[word, weight] for word, weight in top]
         kept += len(top)
     for first, shard in shards.items():

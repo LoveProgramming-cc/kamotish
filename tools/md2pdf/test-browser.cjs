@@ -81,24 +81,30 @@ async function main() {
     await writer.waitForFunction(() => document.querySelector('#kw-docTitle')?.value === '测试');
     assert.equal((await browser.pages()).length, pageCount, 'Writer must stay in the same browser tab');
     assert.equal(await page.$eval('nav [data-tab="writer"]', e => e.classList.contains('on')), true);
-    assert.equal(await page.$$eval('.writer-top .topActions button', e => e.length), 2);
+    assert.equal(await page.$$eval('.writer-top .menubar button', e => e.map(b => b.textContent).join()), '文件,编辑,插入,格式,工具');
     assert.equal(await writer.$$eval('#kw-editor .kamo-err', e => e.length), 0);
     assert.equal(await writer.$$eval('#kw-editor .kamo-run', e => e.length), 1);
     assert.equal(await writer.$$eval('#kw-editor table', e => e.length), 1);
-    await writer.waitForFunction(() => document.querySelector('#kw-editor img')?.naturalWidth > 0);
+    await writer.waitForFunction(() => document.querySelector('#kw-editor .kw-image img')?.naturalWidth > 0);
     await writer.click('#kw-pdfBtn');
     assert.equal(await page.$eval('nav [data-tab="doc"]',e=>e.classList.contains('on')),true);
     assert.equal(await page.evaluate(()=>current.md),source);
     await page.click('nav [data-tab="writer"]');
-    const selected = await writer.evaluate(() => {
-      const units=document.querySelectorAll('#kw-editor .kw-unit');const range=document.createRange();
-      range.setStartBefore(units[0]);range.setEndAfter(units[1]);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
-      return [...units].filter(e=>range.intersectsNode(e)).length;
-    });
-    assert.equal(selected,2);
-    await writer.click('#kw-sizeMenu');
-    await writer.evaluate(()=>[...document.querySelectorAll('#kw-dropdown button')].find(b=>b.dataset.value==='20').click());
-    assert.equal(await writer.$$eval('#kw-editor .kw-unit[style*="20pt"]',e=>e.length),2);
+    // Helpers that address the editor through its document model.
+    const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const settle = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => setTimeout(r, 30))));
+    const shortcut = async (...keys) => { for (const k of keys) await page.keyboard.down(k); for (const k of [...keys].reverse()) await page.keyboard.up(k); await settle(); };
+    const sel = (from, to = from) => page.evaluate((f, t) => { const v = writerInstance.view; v.focus(); v.dispatch(v.state.tr.setSelection(PM.state.TextSelection.create(v.state.doc, f, t))); }, from, to);
+    const units = () => page.evaluate(() => { const r = []; writerInstance.view.state.doc.descendants((n, p) => { if (n.type.name === 'kamo') r.push(p); }); return r; });
+    const selection = () => page.evaluate(() => { const s = writerInstance.view.state.selection; return [s.anchor, s.head]; });
+    const reset = (html = '<p></p>') => page.evaluate(h => { const v = writerInstance.view, M = KamotishWriterModel, box = document.createElement('div'); box.innerHTML = h; const doc = M.domToDoc(box); v.dispatch(v.state.tr.replaceWith(0, v.state.doc.content.size, doc.content)); v.focus(); v.dispatch(v.state.tr.setSelection(PM.state.TextSelection.create(v.state.doc, 1))); }, html);
+    const docText = () => page.evaluate(() => writerInstance.view.state.doc.textContent);
+    const clickMenuItem = async (anchor, label) => { await page.click(anchor); await page.evaluate(l => [...document.querySelectorAll('#kw-dropdown button')].find(b => b.querySelector('.menuLabel')?.firstChild?.textContent === l).click(), label); };
+    {
+      const [a, b] = await units(); await sel(a, b + 1);
+      await clickMenuItem('#kw-sizeMenu', '20');
+      assert.equal(await writer.$$eval('#kw-editor .kw-unit', es => es.filter(e => getComputedStyle(e).fontSize === '26.6667px').length), 2);
+    }
     const native = await writer.evaluate(() => writerInstance.exportNative().content);
     await writer.evaluate(() => writerInstance.importNative(writerInstance.exportNative()));
     assert.deepEqual(await writer.evaluate(() => writerInstance.exportNative().content), native);
@@ -110,56 +116,146 @@ async function main() {
     await writer.evaluate(() => writerInstance.openMarkdown({name:'旧文稿.md' ,md:'\\kamotish{\\no\\3}'}));
     assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>e.dataset.raw),'\\nou\\3');
     assert.equal(await writer.evaluate(() => KamoIME.candidates('nou')[0].value), '\\nou');
-    // Word/Docs-style sizes: points, selected range only, mixed state, custom
-    // values, native typing and vector typing, with native undo/redo.
-    await writer.evaluate(async()=>{
-      await writerInstance.openMarkdown({name:'字号与退格.md',md:'正文ABC\n\n\\kamotish{\\nou\\mi\\nou}'});
-      const e=document.querySelector('#kw-editor');e.focus();
-      const r=document.createRange();r.selectNodeContents(e.querySelector('p'));const s=getSelection();s.removeAllRanges();s.addRange(r);
-    });
+    // Docs-style sizes: points, selected range only, mixed state, custom values,
+    // native typing and vector typing, with undo/redo.
+    await writer.evaluate(() => writerInstance.openMarkdown({name:'字号与退格.md',md:'正文ABC\n\n\\kamotish{\\nou\\mi\\nou}'}));
+    await sel(1, 6);
     await writer.waitForFunction(()=>document.querySelector('#kw-fontSize').value==='12');
     const setSize=async value=>{await writer.click('#kw-fontSize',{clickCount:3});await writer.keyboard.type(String(value));await writer.keyboard.press('Enter');};
     await setSize(18.5);
     assert.equal(await writer.$eval('#kw-fontSize',e=>e.value),'18.5');
     assert.equal(await writer.$eval('#kw-editor p span',e=>getComputedStyle(e).fontSize),'24.6667px');
     assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>getComputedStyle(e).fontSize),'16px','Formatting must not affect unselected atoms');
-    await writer.evaluate(()=>{const e=document.querySelector('#kw-editor'),r=document.createRange();r.selectNodeContents(e);const s=getSelection();s.removeAllRanges();s.addRange(r);});
+    await page.evaluate(() => { const v = writerInstance.view; v.focus(); v.dispatch(v.state.tr.setSelection(new PM.state.AllSelection(v.state.doc))); });
     await writer.waitForFunction(()=>document.querySelector('#kw-fontSize').value===''&&document.querySelector('#kw-fontSize').placeholder==='混合');
     await setSize(24);
     assert.equal(await writer.$eval('#kw-fontSize',e=>e.value),'24');
     assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.every(e=>getComputedStyle(e).fontSize==='32px')),true);
-    assert.equal(await writer.$$eval('#kw-editor p',es=>es.length),2,'Formatting must preserve paragraphs: '+await writer.$eval('#kw-editor',e=>e.innerHTML.replace(/<svg[\s\S]*?<\/svg>/g,'')));
+    assert.equal(await writer.$$eval('#kw-editor p',es=>es.length),2,'Formatting must preserve paragraphs');
     await writer.click('#kw-undoBtn');
     assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>getComputedStyle(e).fontSize),'16px');
     await writer.click('#kw-redoBtn');
     assert.equal(await writer.$eval('#kw-editor .kw-unit',e=>getComputedStyle(e).fontSize),'32px');
-    await writer.evaluate(()=>{const e=document.querySelector('#kw-editor'),u=e.querySelectorAll('.kw-unit')[1],r=document.createRange();r.setStartBefore(u);r.collapse(true);e.focus();const s=getSelection();s.removeAllRanges();s.addRange(r);});
+    let atoms = await units(); await sel(atoms[1]);
     await writer.waitForFunction(()=>!document.querySelector('#kw-caret').hidden);
-    const caretPosition=await writer.evaluate(()=>{const c=document.querySelector('#kw-caret').getBoundingClientRect(),u=document.querySelector('#kw-editor .kw-unit').getBoundingClientRect();return Math.abs(c.left-u.right)<2&&c.height>20;});
+    const caretPosition=await writer.evaluate(()=>{const c=document.querySelector('#kw-caret').getBoundingClientRect(),u=document.querySelector('#kw-editor .kw-unit').getBoundingClientRect();return Math.abs(c.left+1-u.right)<2&&c.height>20;});
     assert(caretPosition,'Visible caret must sit between the actual glyphs');
+    const realBreaks = () => writer.$$eval('#kw-editor br:not(.ProseMirror-trailingBreak)',es=>es.length);
     await writer.keyboard.press('Backspace');
     assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.length),2);
     assert.equal(await writer.$$eval('#kw-editor p',es=>es.length),2,'Deleting an atom must not create a paragraph');
-    assert.equal(await writer.$$eval('#kw-editor br',es=>es.length),0,'Deleting an atom must not insert a line break');
+    assert.equal(await realBreaks(),0,'Deleting an atom must not insert a line break');
     await writer.click('#kw-undoBtn');
     assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.length),3,'Atomic deletion must support undo');
     await writer.click('#kw-redoBtn');
     assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.length),2);
-    assert.equal(await writer.$$eval('#kw-editor br',es=>es.length),0,'Redo must not restore the unwanted line break');
+    assert.equal(await realBreaks(),0,'Redo must not restore an unwanted line break');
     await writer.click('#kw-undoBtn');
-    await writer.evaluate(()=>{const e=document.querySelector('#kw-editor'),u=e.querySelectorAll('.kw-unit')[1],r=document.createRange();r.setStartBefore(u);r.collapse(true);e.focus();const s=getSelection();s.removeAllRanges();s.addRange(r);});
+    atoms = await units(); await sel(atoms[1]);
     await writer.keyboard.press('Delete');
     assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.length),2);
+    // Arrow keys step over one atom at a time; Home/End reach the line edges past atoms.
+    atoms = await units(); const paragraphEnd = atoms[1] + 1;
+    await sel(paragraphEnd); await writer.keyboard.press('ArrowLeft'); assert.deepEqual(await selection(), [atoms[1], atoms[1]]);
+    await writer.keyboard.press('ArrowLeft'); assert.deepEqual(await selection(), [atoms[0], atoms[0]]);
+    await sel(paragraphEnd); await writer.keyboard.press('Home'); assert.deepEqual(await selection(), [atoms[0], atoms[0]]);
+    await writer.keyboard.down('Shift'); await writer.keyboard.press('End'); await writer.keyboard.up('Shift'); assert.deepEqual(await selection(), [atoms[0], paragraphEnd]);
+    if (MOD === 'Meta') { await sel(paragraphEnd); await shortcut('Meta', 'Shift', 'ArrowLeft'); assert.deepEqual(await selection(), [paragraphEnd, atoms[0]], '⌘⇧← must select past atoms to the line start'); }
+    await sel(paragraphEnd);
     await setSize(30);
     await writer.keyboard.type('nou');await writer.keyboard.press('1');
-    assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.some(e=>e.style.fontSize==='30pt')),true,'New vector input must inherit the chosen size');
+    assert.equal(await writer.$$eval('#kw-editor .kw-unit',es=>es.filter(e=>getComputedStyle(e).fontSize==='40px').length),1,'New vector input must inherit the chosen size');
+    assert.match(await writer.evaluate(()=>writerInstance.exportMarkdown()), /\\kamotish\{\\nou\\nou\}/, 'Consecutive graphemes typed with the IME join one run');
     await writer.click('#kw-nativeMode');
     await setSize(15);
     await writer.keyboard.type('XYZ');
     assert.equal(await writer.evaluate(()=>{const w=document.createTreeWalker(document.querySelector('#kw-editor'),NodeFilter.SHOW_TEXT);while(w.nextNode())if(w.currentNode.textContent.includes('XYZ'))return getComputedStyle(w.currentNode.parentElement).fontSize;return null;}),'20px','New ordinary input must inherit the chosen size');
     await writer.click('#kw-kamoMode');
+    // Tone: select a grapheme and press a tone key; the picker changes it as well.
+    atoms = await units(); await page.evaluate(p => { const v = writerInstance.view; v.dispatch(v.state.tr.setSelection(PM.state.NodeSelection.create(v.state.doc, p))); v.focus(); }, atoms[0]);
+    await writer.keyboard.press('3');
+    assert.equal(await page.evaluate(p => writerInstance.view.state.doc.nodeAt(p).attrs.raw, atoms[0]), '\\nou\\3');
+    await page.click('#kw-editor .kw-unit'); await page.waitForFunction(() => !document.querySelector('#kw-tonePicker').hidden);
+    await page.evaluate(() => document.querySelectorAll('#kw-toneChoices button')[1].click());
+    assert.equal(await page.evaluate(p => writerInstance.view.state.doc.nodeAt(p).attrs.raw, atoms[0]), '\\nou\\2');
+    await writer.click('#kw-undoBtn');
+    assert.equal(await page.evaluate(p => writerInstance.view.state.doc.nodeAt(p).attrs.raw, atoms[0]), '\\nou\\3', 'Tone changes are undoable');
     await writer.screenshot({path:'/private/tmp/kamotish-writer-font-size.png',fullPage:true});
-    console.log('PASS: caret between SVG atoms, atomic Backspace/Delete and undo, point sizes, custom and mixed sizes, selection preservation, native/vector typing and formatting undo/redo.');
+    console.log('PASS: caret between SVG atoms, atomic Backspace/Delete and undo, arrows and Home/End over atoms, point sizes, custom and mixed sizes, native/vector typing, tone keys and undo.');
+    // Docs features: shortcuts, Markdown autoformat, lists, links, find/replace, clipboard.
+    await page.click('#kw-nativeMode');
+    await reset();
+    await page.keyboard.type('# 标题甲'); await page.keyboard.press('Enter'); await page.keyboard.type('正文一');
+    assert.equal(await page.$eval('#kw-editor h1', e => e.textContent), '标题甲', 'Typing "# " makes a heading');
+    await page.waitForFunction(() => document.querySelector('#kw-outline button')?.textContent === '标题甲');
+    await shortcut('Shift', 'ArrowLeft'); await shortcut('Shift', 'ArrowLeft');
+    await shortcut(MOD, 'b'); assert.equal(await page.$eval('#kw-editor strong', e => e.textContent), '文一');
+    assert.equal(await page.$eval('[data-mark="bold"]', e => e.classList.contains('on')), true, 'Toolbar shows the active format');
+    await shortcut(MOD, 'z'); assert.equal(await page.$$eval('#kw-editor strong', e => e.length), 0);
+    await page.keyboard.press('End'); await page.keyboard.press('Enter');
+    await page.keyboard.type('- 项目一'); await page.keyboard.press('Enter'); await page.keyboard.type('项目二'); await page.keyboard.press('Tab');
+    assert.equal(await page.$$eval('#kw-editor ul ul li', e => e.length), 1, 'Tab nests a list item');
+    await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
+    assert.equal(await page.$$eval('#kw-editor ul > li', e => e.length), 2);
+    await shortcut(MOD, 'Shift', '7'); assert.equal(await page.$$eval('#kw-editor ol > li', e => e.length), 2, 'Changing list type keeps the items');
+    await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => writerInstance.view.state.selection.$from.parent.type.name), 'paragraph', 'Enter on an empty item leaves the list');
+    await page.keyboard.type('访问网站');
+    await shortcut('Shift', 'ArrowLeft'); await shortcut('Shift', 'ArrowLeft');
+    await shortcut(MOD, 'k'); await page.waitForFunction(() => !document.querySelector('#kw-linkDialog').hidden);
+    await page.keyboard.type('example.com'); await page.keyboard.press('Enter');
+    assert.equal(await page.$eval('#kw-editor a', e => [e.textContent, e.getAttribute('href')].join()), '网站,https://example.com');
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForFunction(() => !document.querySelector('#kw-linkBubble').hidden);
+    await page.click('#kw-linkRemove'); assert.equal(await page.$$eval('#kw-editor a', e => e.length), 0);
+    await shortcut(MOD, 'f'); await page.waitForFunction(() => !document.querySelector('#kw-findBar').hidden);
+    await page.$eval('#kw-findInput', e => { e.value = ''; }); await page.type('#kw-findInput', '项目');
+    assert.equal(await page.$eval('#kw-findCount', e => e.textContent), '1 / 2');
+    assert.equal(await page.$$eval('#kw-editor .kw-find', e => e.length), 2);
+    await page.click('#kw-findBtn'); await page.type('#kw-replaceInput', '条目'); await page.click('#kw-replaceAll');
+    assert.match(await docText(), /条目一条目二/); assert.doesNotMatch(await docText(), /项目/);
+    await page.click('#kw-findClose');
+    // Plain-text copy gives Kamotish source; pasted source becomes atoms.
+    await reset('<p>前<span class="kamo-run"><span class="kw-unit" data-raw="\\mi" data-kind="glyph" data-name="mi"></span>文</span>后</p>');
+    const copied = await page.evaluate(() => { const v = writerInstance.view; return KamotishWriterModel.sliceToText(v.state.doc.slice(1, v.state.doc.content.size - 1)); });
+    assert.equal(copied, '前\\kamotish{\\mi文}后');
+    await sel(1);
+    await page.evaluate(() => { const dt = new DataTransfer(); dt.setData('text/plain', '粘贴\\kamotish{\\nou\\2}'); writerInstance.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); });
+    assert.equal(await page.evaluate(() => { let n = 0; writerInstance.view.state.doc.descendants(x => { if (x.attrs?.raw === '\\nou\\2') n++; }); return n; }), 1, 'Pasted \\kamotish source becomes an atom');
+    await page.screenshot({path:'/private/tmp/kamotish-writer-docs-features.png'});
+    console.log('PASS: Markdown autoformat, outline, bold shortcut and toolbar state, undo, nested lists, list type switch, links and link bubble, find and replace all, plain-text copy and Kamotish paste.');
+    // LaTeX: $…$ inline, $$ block with the formula editor, Markdown import/export.
+    await reset();
+    await page.click('#kw-nativeMode'); await sel(1);
+    await page.keyboard.type('质能 $E=mc^2$ 与价格 $5 和 $6');
+    const mathNodes = () => page.evaluate(() => { const r = []; writerInstance.view.state.doc.descendants(n => { if (n.type.name.startsWith('math')) r.push(n.type.name + ':' + n.attrs.tex); }); return r; });
+    assert.deepEqual(await mathNodes(), ['math_inline:E=mc^2'], 'Typing $…$ makes an inline formula; prices stay text');
+    assert.equal(await page.$$eval('#kw-editor .kw-math .katex', e => e.length), 1);
+    await page.keyboard.press('Enter'); await page.keyboard.type('$$');
+    await page.waitForFunction(() => !document.querySelector('#kw-mathEditor').hidden && document.activeElement.id === 'kw-mathSource');
+    await page.keyboard.type('\\int_0^1 x\\,dx'); await page.keyboard.press('Enter');
+    assert.deepEqual(await mathNodes(), ['math_inline:E=mc^2', 'math_display:\\int_0^1 x\\,dx']);
+    assert.equal(await page.$eval('#kw-mathEditor', e => e.hidden), true);
+    await page.click('#kw-editor .kw-math');
+    await page.waitForFunction(() => document.querySelector('#kw-mathSource').value === 'E=mc^2' && !document.querySelector('#kw-mathEditor').hidden);
+    await page.click('#kw-mathPalette button[title="分数"]');
+    assert.equal(await page.$eval('#kw-mathSource', e => e.value), 'E=mc^2\\frac{}{}');
+    await page.keyboard.type('1'); await page.keyboard.press('Escape');
+    assert.deepEqual((await mathNodes())[0], 'math_inline:E=mc^2', 'Esc cancels an edit');
+    const mathMd = await page.evaluate(() => writerInstance.exportMarkdown());
+    assert.match(mathMd, /质能 \$E=mc\^2\$ 与价格 \\\$5 和 \\\$6/); assert.match(mathMd, /\$\$\n\\int_0\^1 x\\,dx\n\$\$/);
+    await page.evaluate(md => writerInstance.openMarkdown({ name: '公式.md', md: md + '\n\n```latex\nc^2\n```\n\n行内 \\(a+b\\)' }), mathMd);
+    assert.deepEqual(await mathNodes(), ['math_inline:E=mc^2', 'math_display:\\int_0^1 x\\,dx', 'math_display:c^2', 'math_inline:a+b']);
+    assert.match(await docText(), /价格 \$5 和 \$6/, 'Escaped dollars stay text after a roundtrip');
+    const mathNative = await page.evaluate(() => writerInstance.exportNative().content);
+    await page.evaluate(() => writerInstance.importNative(writerInstance.exportNative()));
+    assert.deepEqual(await page.evaluate(() => writerInstance.exportNative().content), mathNative);
+    await page.screenshot({path:'/private/tmp/kamotish-writer-math.png'});
+    await reset(); await page.click('#kw-kamoMode'); await sel(1);
+    await page.keyboard.type('$3. '); await page.keyboard.press('k');
+    assert.equal(await page.$eval('#kw-ime', e => e.hidden), false, 'A lone $ must not stop the Kamotish IME');
+    await page.keyboard.press('Escape'); await page.click('#kw-nativeMode');
+    console.log('PASS: $…$ inline formulas, $$ formula blocks with editor and palette, Esc cancel, Markdown/latex fence/\\(\\) import and export, native roundtrip.');
     // Direct .md file import, including the user's real document when supplied.
     const input = process.env.KAMOTISH_TEST_MD || path.join(temporary, 'direct.md');
     if (!process.env.KAMOTISH_TEST_MD) fs.writeFileSync(input, source);
@@ -178,8 +274,8 @@ async function main() {
       const count = await writer.evaluate(async entries => {
         const files = entries.map(e => ({ path: e.path, file: new File([e.text === undefined ? Uint8Array.from(atob(e.base64), c => c.charCodeAt(0)) : e.text], e.name, { type: e.text === undefined ? 'image/jpeg' : 'text/markdown' }) }));
         const [d] = await KamotishFiles.readEntries(files); await writerInstance.openMarkdown(d);
-        await Promise.all([...document.querySelectorAll('#kw-editor img')].map(img => img.decode()));
-        return document.querySelectorAll('#kw-editor img').length;
+        await Promise.all([...document.querySelectorAll('#kw-editor .kw-image img')].map(img => img.decode()));
+        return document.querySelectorAll('#kw-editor .kw-image img').length;
       }, entries);
       assert.equal(count, refs.length);
       const actualNative = await writer.evaluate(() => writerInstance.exportNative().content);
@@ -217,7 +313,7 @@ async function main() {
     await page.waitForFunction(()=>document.querySelector('#kw-docTitle').value==='文稿甲'&&!document.querySelector('#kw-documentView').hidden);
     // Empty paragraphs, CSS zoom, tone keys and candidate pages.
     for(const tone of ['1','2','3','4']){
-      await page.evaluate(()=>{const e=document.querySelector('#kw-editor');e.innerHTML='<p><br></p>';e.focus();const r=document.createRange();r.setStart(e.firstChild,0);r.collapse(true);getSelection().removeAllRanges();getSelection().addRange(r);});
+      await reset();
       await page.keyboard.type('nou');
       const bounds=await page.evaluate(()=>({popup:document.querySelector('#kw-ime').getBoundingClientRect().toJSON(),caret:document.querySelector('#kw-editor p').getBoundingClientRect().toJSON()}));
       assert(Math.abs(bounds.popup.x-bounds.caret.x)<10,'IME must align with the empty-paragraph caret');
@@ -225,15 +321,15 @@ async function main() {
       await page.keyboard.press(tone);
       assert.equal(await page.$eval('#kw-editor .kw-unit',e=>e.dataset.raw),'\\nou'+(tone==='1'?'':'\\'+tone));
     }
-    await page.evaluate(()=>{const e=document.querySelector('#kw-editor');e.innerHTML='<p><br></p>';e.focus();const r=document.createRange();r.setStart(e.firstChild,0);r.collapse(true);getSelection().removeAllRanges();getSelection().addRange(r);KamoIME._testSetShards({n:{nou:Array.from({length:20},(_,i)=>['候选'+i,100-i])}});});
+    await reset(); await page.evaluate(()=>KamoIME._testSetShards({n:{nou:Array.from({length:20},(_,i)=>['候选'+i,100-i])}}));
     await page.keyboard.type('nou');await page.keyboard.press('ArrowRight');
     assert.equal(await page.$eval('#kw-candidates .selected',e=>Number(e.dataset.i)),1);
     await page.keyboard.press('ArrowDown');assert.equal(await page.$eval('#kw-candidates .selected',e=>Number(e.dataset.i)),7);
     await page.keyboard.press('ArrowUp');assert.equal(await page.$eval('#kw-candidates .selected',e=>Number(e.dataset.i)),1);
     await page.keyboard.press('Space');assert.equal(await page.$eval('#kw-editor .kw-unit',e=>e.dataset.raw),'\\nou\\2');
-    await page.evaluate(()=>{document.querySelector('#kw-editor').innerHTML='<p><br></p>';});
-    await page.click('#kw-nativeMode'); await page.click('#kw-editor'); await page.keyboard.type('First document');
-    // Insert a configurable table at the caret.
+    await reset();
+    await page.click('#kw-nativeMode'); await page.click('#kw-editor p'); await page.keyboard.type('First document');
+    // Insert a configurable table at the caret, then edit it from the context menu.
     await page.click('#kw-insertMenu');
     await page.evaluate(()=>[...document.querySelectorAll('#kw-dropdown button')].find(e=>e.textContent.includes('表格')).click());
     await page.$eval('#kw-tableRows',e=>e.value='2'); await page.$eval('#kw-tableColumns',e=>e.value='3');
@@ -241,16 +337,21 @@ async function main() {
     assert.equal(await page.$$eval('#kw-editor table tr',e=>e.length),2);
     assert.equal(await page.$$eval('#kw-editor table th',e=>e.length),3);
     assert.equal(await page.$$eval('#kw-editor table td',e=>e.length),3);
-    await page.click('#kw-editor th'); await page.keyboard.type('Header');
+    await page.keyboard.type('Header');
+    await page.click('#kw-editor td', { button: 'right' });
+    await page.evaluate(()=>[...document.querySelectorAll('#kw-dropdown button')].find(e=>e.textContent.includes('在下方插入行')).click());
+    assert.equal(await page.$$eval('#kw-editor table tr',e=>e.length),3);
+    await shortcut(MOD, 'z');
+    assert.equal(await page.$$eval('#kw-editor table tr',e=>e.length),2);
     // Insert a real image through the menu/file picker, retaining text and the insertion point.
     const imageFile=path.join(temporary,'figure.png');fs.writeFileSync(imageFile,Buffer.from(png,'base64'));
-    await page.evaluate(()=>{const editor=document.querySelector('#kw-editor');const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);getSelection().removeAllRanges();getSelection().addRange(range);editor.focus();});
+    await page.evaluate(()=>{const v=writerInstance.view;v.focus();v.dispatch(v.state.tr.setSelection(PM.state.Selection.atEnd(v.state.doc)));});
     await page.click('#kw-insertMenu');const imageChooser=page.waitForFileChooser();
     await page.evaluate(()=>[...document.querySelectorAll('#kw-dropdown button')].find(e=>e.textContent.startsWith('图片')).click());
     await (await imageChooser).accept([imageFile]);
-    await page.waitForFunction(()=>document.querySelector('#kw-editor img')?.naturalWidth===1);
-    assert.match(await page.$eval('#kw-editor',e=>e.textContent),/First document/);
-    assert.match(await page.$eval('#kw-editor',e=>e.textContent),/Header/);
+    await page.waitForFunction(()=>document.querySelector('#kw-editor .kw-image img')?.naturalWidth===1);
+    assert.match(await docText(),/First document/);
+    assert.match(await docText(),/Header/);
     const firstId=await page.evaluate(()=>writerInstance.exportNative().id);
     await page.evaluate(()=>writerInstance.save());
     await page.screenshot({path:'/private/tmp/kamotish-writer-insert.png',fullPage:true});
@@ -265,9 +366,9 @@ async function main() {
     const secondId=await page.evaluate(()=>writerInstance.exportNative().id);assert.notEqual(firstId,secondId);
     await page.evaluate(()=>writerInstance.closeDocument());
     await page.evaluate(id=>writerInstance.openSavedDocument(id),firstId);
-    assert.match(await page.$eval('#kw-editor',e=>e.textContent),/First document/);
+    assert.match(await docText(),/First document/);
     assert.equal(await page.$$eval('#kw-editor table tr',e=>e.length),2);
-    await page.waitForFunction(()=>document.querySelector('#kw-editor img')?.naturalWidth===1);
+    await page.waitForFunction(()=>document.querySelector('#kw-editor .kw-image img')?.naturalWidth===1);
     // A failed write must keep the active document open.
     await page.evaluate(()=>{window.actualPut=KamotishLibrary.put;KamotishLibrary.put=async()=>{throw Error('simulated storage failure');};const title=document.querySelector('#kw-docTitle');title.value='文稿甲';title.dispatchEvent(new Event('input',{bubbles:true}));});
     await page.evaluate(()=>writerInstance.closeDocument());assert.equal(await page.evaluate(()=>writerInstance.hasDocument()),true);
@@ -298,7 +399,7 @@ async function main() {
     // Duplicating an edited Markdown import must use its saved edits, not the original source.
     await page.evaluate(async()=>{
       await writerInstance.openMarkdown({name:'导入后编辑.md',md:'Original source'});
-      const editor=document.querySelector('#kw-editor');editor.innerHTML='<p>Saved edited content</p>';editor.dispatchEvent(new Event('input',{bubbles:true}));
+      const v=writerInstance.view,s=v.state;v.dispatch(s.tr.replaceWith(0,s.doc.content.size,s.schema.nodes.paragraph.create(null,s.schema.text('Saved edited content'))));
       await writerInstance.closeDocument();
     });
     const editedId=await page.evaluate(()=>[...document.querySelectorAll('.library-row')].find(e=>e.querySelector('strong').textContent==='导入后编辑').dataset.documentId);

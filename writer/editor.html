@@ -1,67 +1,107 @@
 <section id="kw-libraryView" class="library-view" aria-label="我的文稿">
-  <div class="library-heading"><div><span class="writer-eyebrow">文稿编辑</span><h2>我的文稿</h2><p>保存在此浏览器中 · 关闭文稿后仍可在这里找回</p></div><div class="library-actions"><button id="kw-libraryFileMenu" class="menuAnchor" data-menu="file" aria-haspopup="menu">导入 <span class="chevron">⌄</span></button><button id="kw-newDocument" class="primary">＋ 新建文稿</button></div></div>
+  <div class="library-heading"><div><span class="writer-eyebrow">文稿编辑</span><h2>我的文稿</h2><p>保存在此浏览器中 · 关闭文稿后仍可在这里找回</p></div><div class="library-actions"><button id="kw-libraryFileMenu" class="menuAnchor" data-menu="import" aria-haspopup="menu">导入 <span class="chevron">⌄</span></button><button id="kw-newDocument" class="primary">＋ 新建文稿</button></div></div>
   <div class="library-filter"><input id="kw-librarySearch" type="search" placeholder="搜索文稿名称" aria-label="搜索文稿"><select id="kw-librarySort" aria-label="排序"><option value="updated">最近修改</option><option value="title">按名称</option></select><span id="kw-libraryCount"></span></div>
   <div id="kw-libraryStatus" role="status">正在载入文稿…</div>
   <div id="kw-libraryList" class="library-list"></div>
 </section>
 <div id="kw-documentView" class="writer-document-view" hidden>
 <div class="writer-top">
-  <button id="kw-backToLibrary" class="iconBtn" title="关闭文稿，返回我的文稿" aria-label="返回我的文稿">←</button>
-  <button id="kw-sideToggle" class="iconBtn" title="隐藏或显示文稿目录" aria-label="显示/隐藏侧边栏" aria-expanded="true">☰</button>
-  <div class="writer-title"><span class="writer-eyebrow">文稿编辑</span><input id="kw-docTitle" aria-label="文稿标题" value="未命名文稿"></div>
-  <div class="topActions"><span id="kw-saveStatus">本地自动保存</span><button id="kw-fileMenu" class="menuAnchor" data-menu="file" aria-haspopup="menu" aria-expanded="false">文件 <span class="chevron">⌄</span></button><button id="kw-pdfBtn" class="primary">排版 / PDF</button></div>
+  <button id="kw-backToLibrary" class="iconBtn" title="关闭文稿，返回我的文稿" aria-label="返回我的文稿"><svg class="ico" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>
+  <div class="writer-title">
+    <div class="titleRow"><input id="kw-docTitle" aria-label="文稿标题" value="未命名文稿" spellcheck="false"><span id="kw-saveStatus" role="status">本地自动保存</span></div>
+    <nav class="menubar" aria-label="菜单栏">
+      <button id="kw-fileMenu" class="menuAnchor menubarItem" data-menu="file" aria-haspopup="menu" aria-expanded="false">文件</button>
+      <button class="menuAnchor menubarItem" data-menu="edit" aria-haspopup="menu" aria-expanded="false">编辑</button>
+      <button id="kw-insertMenu" class="menuAnchor menubarItem" data-menu="insert" aria-haspopup="menu" aria-expanded="false">插入</button>
+      <button class="menuAnchor menubarItem" data-menu="format" aria-haspopup="menu" aria-expanded="false">格式</button>
+      <button class="menuAnchor menubarItem" data-menu="tools" aria-haspopup="menu" aria-expanded="false">工具</button>
+    </nav>
+  </div>
+  <div class="topActions"><button id="kw-pdfBtn" class="primary">排版 / PDF</button></div>
 </div>
-<section class="tools" aria-label="排版工具栏">
-  <button id="kw-blockStyle" class="menuAnchor" data-menu="block" title="段落类型" aria-haspopup="listbox">正文 <span class="chevron">⌄</span></button>
-  <button id="kw-fontFamily" class="menuAnchor" data-menu="font" title="字体" aria-haspopup="listbox">宋体 <span class="chevron">⌄</span></button>
-  <div class="fontSizeControl"><input id="kw-fontSize" type="text" inputmode="decimal" value="12" aria-label="字号（磅）" title="字号（磅），可输入自定义数值"><button id="kw-sizeMenu" class="menuAnchor" data-menu="size" title="选择字号" aria-label="选择字号" aria-haspopup="listbox">⌄</button></div>
+<section class="tools" role="toolbar" aria-label="格式工具栏">
+  <button id="kw-findBtn" data-action="find" title="查找和替换" aria-label="查找和替换"><svg class="ico" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></button>
+  <button id="kw-undoBtn" data-action="undo" aria-label="撤销" title="撤销"><svg class="ico" viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg></button>
+  <button id="kw-redoBtn" data-action="redo" aria-label="重做" title="重做"><svg class="ico" viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg></button>
+  <button id="kw-zoomLevel" data-menu="zoom" class="menuAnchor narrowMenu" title="缩放" aria-haspopup="listbox">100% <span class="chevron">⌄</span></button>
   <span class="separator"></span>
-  <button data-cmd="bold" aria-label="加粗" title="加粗 (⌘/Ctrl+B)"><b>B</b></button>
-  <button data-cmd="italic" aria-label="斜体" title="斜体"><i>I</i></button>
-  <button data-cmd="underline" aria-label="下划线" title="下划线"><u>U</u></button>
-  <button data-cmd="strikeThrough" aria-label="删除线" title="删除线"><s>S</s></button>
-  <button id="kw-colorMenu" class="menuAnchor colorBtn" data-menu="color" title="文字颜色" aria-haspopup="dialog"><span class="colorMark">A</span><span class="chevron">⌄</span></button>
+  <button id="kw-blockStyle" class="menuAnchor" data-menu="block" title="样式" aria-haspopup="listbox"><span class="label">正文</span> <span class="chevron">⌄</span></button>
   <span class="separator"></span>
-  <button data-cmd="justifyLeft" title="左对齐" aria-label="左对齐">☰</button>
-  <button data-cmd="justifyCenter" title="居中" aria-label="居中">≡</button>
-  <button data-cmd="justifyRight" title="右对齐" aria-label="右对齐">☷</button>
-  <button data-cmd="insertUnorderedList" title="无序列表">• 列表</button>
-  <button data-cmd="insertOrderedList" title="有序列表">1. 列表</button>
+  <button id="kw-fontFamily" class="menuAnchor" data-menu="font" title="字体" aria-haspopup="listbox"><span class="label">宋体</span> <span class="chevron">⌄</span></button>
   <span class="separator"></span>
-  <button id="kw-undoBtn" aria-label="撤销" title="撤销">↶</button>
-  <button id="kw-redoBtn" aria-label="重做" title="重做">↷</button>
-  <button id="kw-insertMenu" class="menuAnchor" data-menu="insert" aria-haspopup="menu" aria-expanded="false">插入 <span class="chevron">⌄</span></button>
+  <div class="fontSizeControl">
+    <button id="kw-sizeDown" data-action="sizeDown" title="减小字号" aria-label="减小字号">−</button>
+    <input id="kw-fontSize" type="text" inputmode="decimal" value="12" aria-label="字号（磅）" title="字号（磅），可输入自定义数值">
+    <button id="kw-sizeMenu" class="menuAnchor" data-menu="size" title="选择字号" aria-label="选择字号" aria-haspopup="listbox"><span class="chevron">⌄</span></button>
+    <button id="kw-sizeUp" data-action="sizeUp" title="增大字号" aria-label="增大字号">+</button>
+  </div>
+  <span class="separator"></span>
+  <button data-mark="bold" aria-label="加粗" title="加粗"><svg class="ico" viewBox="0 0 24 24"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/></svg></button>
+  <button data-mark="italic" aria-label="斜体" title="斜体"><svg class="ico" viewBox="0 0 24 24"><path d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z"/></svg></button>
+  <button data-mark="underline" aria-label="下划线" title="下划线"><svg class="ico" viewBox="0 0 24 24"><path d="M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z"/></svg></button>
+  <button data-mark="strike" aria-label="删除线" title="删除线"><svg class="ico" viewBox="0 0 24 24"><path d="M10 19h4v-3h-4v3zM5 4v3h5v3h4V7h5V4H5zM3 14h18v-2H3v2z"/></svg></button>
+  <button id="kw-colorMenu" class="menuAnchor colorBtn" data-menu="color" title="文字颜色" aria-label="文字颜色" aria-haspopup="dialog"><svg class="ico" viewBox="0 0 24 24"><path d="M11 2 5.5 16h2.25l1.12-3h6.25l1.12 3h2.25L13 2h-2zm-1.38 9L12 4.67 14.38 11H9.62z"/></svg><span class="colorMark"></span></button>
+  <button id="kw-highlightMenu" class="menuAnchor colorBtn" data-menu="highlight" title="突出显示颜色" aria-label="突出显示颜色" aria-haspopup="dialog"><svg class="ico" viewBox="0 0 24 24"><path d="M6 12l3 3v5h6v-5l3-3V7H6v5zm5-11h2v3h-2zM3.5 3.88l1.41-1.41 2.12 2.12L5.62 6 3.5 3.88zm13.46.71 2.12-2.12 1.41 1.41L18.38 6l-1.42-1.41z" transform="translate(0 -1)"/></svg><span class="colorMark highlightMark"></span></button>
+  <span class="separator"></span>
+  <button data-action="link" aria-label="插入链接" title="插入链接"><svg class="ico" viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg></button>
+  <button data-action="image" aria-label="插入图片" title="插入图片"><svg class="ico" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg></button>
+  <button data-action="kamo" aria-label="插入卡谋语" title="插入卡谋语" class="kamoInsert">卡</button>
+  <button data-action="math" aria-label="插入公式" title="插入公式（也可输入 $公式$）" class="mathInsert">∑</button>
+  <span class="separator"></span>
+  <button data-align="left" aria-label="左对齐" title="左对齐"><svg class="ico" viewBox="0 0 24 24"><path d="M15 15H3v2h12v-2zm0-8H3v2h12V7zM3 13h18v-2H3v2zm0 8h18v-2H3v2zM3 3v2h18V3H3z"/></svg></button>
+  <button data-align="center" aria-label="居中对齐" title="居中对齐"><svg class="ico" viewBox="0 0 24 24"><path d="M7 15v2h10v-2H7zm-4 6h18v-2H3v2zm0-8h18v-2H3v2zm4-6v2h10V7H7zM3 3v2h18V3H3z"/></svg></button>
+  <button data-align="right" aria-label="右对齐" title="右对齐"><svg class="ico" viewBox="0 0 24 24"><path d="M3 21h18v-2H3v2zm6-4h12v-2H9v2zm-6-4h18v-2H3v2zm6-4h12V7H9v2zM3 3v2h18V3H3z"/></svg></button>
+  <button data-align="justify" aria-label="两端对齐" title="两端对齐"><svg class="ico" viewBox="0 0 24 24"><path d="M3 21h18v-2H3v2zm0-4h18v-2H3v2zm0-4h18v-2H3v2zm0-4h18V7H3v2zm0-6v2h18V3H3z"/></svg></button>
+  <button class="menuAnchor iconMenu" data-menu="lineHeight" aria-label="行距和段落间距" title="行距" aria-haspopup="listbox"><svg class="ico" viewBox="0 0 24 24"><path d="M6 7h2.5L5 3.5 1.5 7H4v10H1.5L5 20.5 8.5 17H6V7zm4-2v2h12V5H10zm0 14h12v-2H10v2zm0-6h12v-2H10v2z"/></svg></button>
+  <span class="separator"></span>
+  <button data-list="bullet_list" aria-label="项目符号列表" title="项目符号列表"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z"/></svg></button>
+  <button data-list="ordered_list" aria-label="编号列表" title="编号列表"><svg class="ico" viewBox="0 0 24 24"><path d="M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z"/></svg></button>
+  <button data-action="outdent" aria-label="减少缩进" title="减少缩进"><svg class="ico" viewBox="0 0 24 24"><path d="M11 17h10v-2H11v2zm-8-5 4 4V8l-4 4zm0 9h18v-2H3v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z"/></svg></button>
+  <button data-action="indent" aria-label="增加缩进" title="增加缩进"><svg class="ico" viewBox="0 0 24 24"><path d="M3 21h18v-2H3v2zM3 8v8l4-4-4-4zm8 9h10v-2H11v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z"/></svg></button>
+  <button data-action="clearFormat" aria-label="清除格式" title="清除格式"><svg class="ico" viewBox="0 0 24 24"><path d="M3.27 5 2 6.27l6.97 6.97L6.5 19h3l1.57-3.66L16.73 21 18 19.73 3.55 5.27 3.27 5zM6 5v.18L8.82 8h2.4l-.72 1.68 2.1 2.1L14.21 8H20V5H6z"/></svg></button>
+  <span class="toolSpacer"></span>
+  <div class="switch inputSwitch" role="group" aria-label="输入模式"><button id="kw-kamoMode" class="active" title="卡谋语输入法">卡谋语</button><button id="kw-nativeMode" title="系统输入法">系统</button></div>
 </section>
+<div id="kw-findBar" class="findBar" hidden role="search" aria-label="查找和替换">
+  <input id="kw-findInput" placeholder="查找" aria-label="查找" spellcheck="false">
+  <span id="kw-findCount" class="findCount"></span>
+  <button id="kw-findPrev" title="上一个 (⇧Enter)" aria-label="上一个">↑</button><button id="kw-findNext" title="下一个 (Enter)" aria-label="下一个">↓</button>
+  <label class="findCase"><input id="kw-findCase" type="checkbox"> 区分大小写</label>
+  <input id="kw-replaceInput" placeholder="替换为" aria-label="替换为" spellcheck="false">
+  <button id="kw-replaceOne">替换</button><button id="kw-replaceAll">全部替换</button>
+  <button id="kw-findClose" class="findClose" aria-label="关闭查找">×</button>
+</div>
 <div id="kw-layout" class="writer-layout">
   <aside id="kw-sidebar" class="sidebar">
-    <div class="sideTitle">文稿目录</div><div id="kw-outline" class="outline"></div>
-    <div class="sideBottom"><strong>输入模式</strong>
-      <div class="switch"><button id="kw-kamoMode" class="active">卡谋语</button><button id="kw-nativeMode">系统中文</button></div>
-      <p>输入拼音后，1 / 2 / 3 / 4 对应一 / 二 / 三 / 四声；单击已输入字素也可更换声调。</p>
-      <p>← / → 选择候选，↑ / ↓ 翻页；空格或 Enter 确认当前候选。未输入拼音时，方向键照常移动光标。</p>
+    <div class="sideTitle"><span>文稿大纲</span><button id="kw-sideToggle" class="iconBtn small" title="隐藏或显示文稿大纲" aria-label="显示/隐藏大纲" aria-expanded="true"><svg class="ico" viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button></div>
+    <div id="kw-outline" class="outline"></div>
+    <div class="sideBottom">
+      <p>卡谋语模式：输入拼音后，1 / 2 / 3 / 4 选一至四声；← / → 选候选，↑ / ↓ 翻页，空格或 Enter 确认。选中一个字素后按 1–4 可直接改声调。</p>
       <p id="kw-dictionaryStatus" class="dictStatus" aria-live="polite">加载开源中文词库中…</p>
-      <p class="fine">文稿仅保存在浏览器本地。建议定期保存文稿。</p>
+      <p class="fine">文稿保存在此浏览器本地，请定期“文件 → 下载原生文稿”备份。</p>
     </div>
   </aside>
+  <button id="kw-outlineOpen" class="outlineOpen" title="显示文稿大纲" aria-label="显示文稿大纲"><svg class="ico" viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button>
   <div class="workspace" id="kw-workspace">
-    <div class="pageMeta"><span>A4 · 文档视图</span><span id="kw-counter">0 字</span><div class="zoomControls"><button id="kw-zoomOut" aria-label="缩小文档">−</button><button id="kw-zoomLevel" data-menu="zoom" class="menuAnchor" title="缩放比例">100%</button><button id="kw-zoomIn" aria-label="放大文档">+</button></div></div>
-    <article id="kw-editor" class="paper" contenteditable="true" spellcheck="false" aria-label="正文编辑器">
-      <h1>卡谋语文稿</h1>
-      <p>在这里写下你的文稿。也可以打开 Markdown 文件，继续编辑已有的文字和插图。</p>
-      <p><span class="kamo-token" data-kamo="\mi\wou\3中国人\mou\2"></span></p>
-    </article>
-    <div class="footerHint">双指捏合或 Ctrl + 滚轮缩放 · 点击字素更换声调 · ⌘/Ctrl+S 保存到文稿库</div>
+    <article id="kw-editor" class="paper" spellcheck="false" aria-label="正文编辑器"></article>
+    <div class="pageMeta"><span>A4</span><button id="kw-counter" class="counter" title="字数统计">0 字</button></div>
   </div>
 </div>
 </div>
-<div id="kw-dropdown" class="dropdown" hidden role="listbox"></div>
-<div id="kw-tonePicker" class="tonePicker" hidden role="dialog" aria-label="字素声调选择"><span class="toneTitle">字素声调</span><div class="toneChoices" id="kw-toneChoices"></div></div>
+<div id="kw-dropdown" class="dropdown" hidden role="menu"></div>
+<div id="kw-linkBubble" class="linkBubble" hidden><a id="kw-linkHref" target="_blank" rel="noopener noreferrer"></a><button id="kw-linkEdit">编辑</button><button id="kw-linkRemove">移除</button></div>
+<div id="kw-tonePicker" class="tonePicker" hidden role="dialog" aria-label="字素声调选择"><span class="toneTitle">字素声调 · 也可按 1–4</span><div class="toneChoices" id="kw-toneChoices"></div></div>
 <div id="kw-ime" class="ime" hidden><div class="imeHead"><span id="kw-composition"></span><span>卡谋语输入法</span></div><div id="kw-candidates" class="candidates"></div><div class="imeFoot">1–4 一至四声 · ←→ 选择 · ↑↓ 翻页 · Enter/空格 确认 · Esc</div></div>
-<div id="kw-kamoDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-modal="true" aria-label="插入卡谋语"><h2>插入卡谋语</h2><p>输入 <code>\kamotish{...}</code> 中的内容, 或粘贴完整的表达式。</p><textarea id="kw-kamoSource" spellcheck="false" rows="3"></textarea><div class="modalPreview" id="kw-sourcePreview"></div><div class="modalBtns"><button id="kw-cancelInsert">取消</button><button id="kw-confirmInsert" class="primary">插入</button></div></div></div>
+<div id="kw-caret" hidden aria-hidden="true"></div>
+<div id="kw-mathEditor" class="mathEditor" hidden role="dialog" aria-label="编辑公式"><div class="mathPaletteWrap"><div id="kw-mathPalette" class="mathPalette"></div></div><textarea id="kw-mathSource" rows="1" spellcheck="false" placeholder="LaTeX，例如 \frac{a}{b}" aria-label="LaTeX 源码"></textarea><div id="kw-mathPreview" class="mathPreview" aria-live="polite"></div><div class="mathFoot"><span>Enter 完成 · ⇧Enter 换行 · Esc 取消</span><button id="kw-mathDelete" type="button">删除</button><button id="kw-mathDone" type="button" class="primary">完成</button></div></div>
+<div id="kw-kamoDialog" class="modalCover" hidden><form id="kw-kamoForm" class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-kamoHeading"><h2 id="kw-kamoHeading">插入卡谋语</h2><p>输入 <code>\kamotish{...}</code> 中的内容, 或粘贴完整的表达式。</p><textarea id="kw-kamoSource" spellcheck="false" rows="3"></textarea><div class="modalPreview" id="kw-sourcePreview"></div><div class="modalBtns"><button type="button" id="kw-cancelInsert">取消</button><button type="submit" id="kw-confirmInsert" class="primary">插入</button></div></form></div>
+<div id="kw-linkDialog" class="modalCover" hidden><form id="kw-linkForm" class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-linkHeading"><h2 id="kw-linkHeading">链接</h2><label class="field">文字<input id="kw-linkText" aria-label="链接文字"></label><label class="field">链接地址<input id="kw-linkUrl" placeholder="https://" aria-label="链接地址" required></label><div class="modalBtns"><button type="button" id="kw-linkCancel">取消</button><button type="submit" class="primary">应用</button></div></form></div>
+<div id="kw-countDialog" class="modalCover" hidden><div class="modal small" role="dialog" aria-modal="true" aria-labelledby="kw-countHeading"><h2 id="kw-countHeading">字数统计</h2><table id="kw-countTable" class="countTable"></table><div class="modalBtns"><button id="kw-countClose" class="primary">确定</button></div></div></div>
+<div id="kw-shortcutDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-shortcutHeading"><h2 id="kw-shortcutHeading">键盘快捷键</h2><div id="kw-shortcutList" class="shortcutList"></div><div class="modalBtns"><button id="kw-shortcutClose" class="primary">关闭</button></div></div></div>
 <div id="kw-toast" role="status"></div><input id="kw-fileInput" hidden type="file" accept=".kamodoc,.md,.markdown,.html,.txt,application/json">
-<div id="kw-folderDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-label="选择 Markdown 文档"><h2>选择文档</h2><p>图片将随所选文档一起导入。</p><div id="kw-folderFiles"></div><button id="kw-folderCancel">取消</button></div></div>
+<div id="kw-folderDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-label="选择 Markdown 文档"><h2>选择文档</h2><p>图片将随所选文档一起导入。</p><div id="kw-folderFiles"></div><div class="modalBtns"><button id="kw-folderCancel">取消</button></div></div></div>
 <input id="kw-folderInput" type="file" webkitdirectory hidden>
 <div id="kw-nameDialog" class="modalCover" hidden><form id="kw-nameForm" class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-nameHeading"><h2 id="kw-nameHeading">文稿名称</h2><input id="kw-nameInput" required maxlength="160" aria-label="文稿名称"><div class="modalBtns"><button type="button" id="kw-nameCancel">取消</button><button type="submit" class="primary">确定</button></div></form></div>
 <div id="kw-deleteDialog" class="modalCover" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-deleteHeading"><h2 id="kw-deleteHeading">删除文稿？</h2><p id="kw-deleteMessage"></p><div class="modalBtns"><button id="kw-deleteCancel">取消</button><button id="kw-deleteConfirm" class="danger">删除</button></div></div></div>
-<div id="kw-tableDialog" class="modalCover" hidden><form id="kw-tableForm" class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-tableHeading"><h2 id="kw-tableHeading">插入表格</h2><div class="table-dimensions"><label>行数 <input id="kw-tableRows" type="number" min="1" max="30" value="3" required></label><label>列数 <input id="kw-tableColumns" type="number" min="1" max="12" value="3" required></label></div><label class="table-header"><input id="kw-tableHeader" type="checkbox" checked> 第一行为表头</label><div class="modalBtns"><button id="kw-tableCancel" type="button">取消</button><button type="submit" class="primary">插入</button></div></form></div>
+<div id="kw-tableDialog" class="modalCover" hidden><form id="kw-tableForm" class="modal" role="dialog" aria-modal="true" aria-labelledby="kw-tableHeading"><h2 id="kw-tableHeading">插入表格</h2><div id="kw-tableGrid" class="tableGrid" aria-hidden="true"></div><div class="table-dimensions"><label>行数 <input id="kw-tableRows" type="number" min="1" max="30" value="3" required></label><label>列数 <input id="kw-tableColumns" type="number" min="1" max="12" value="3" required></label></div><label class="table-header"><input id="kw-tableHeader" type="checkbox" checked> 第一行为表头</label><div class="modalBtns"><button id="kw-tableCancel" type="button">取消</button><button type="submit" class="primary">插入</button></div></form></div>
 <input id="kw-imageInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" multiple hidden>

@@ -112,5 +112,8 @@ async function handle(req, res) {
 }
 
 http.createServer((req, res) => handle(req, res).catch(e => { console.error(e); send(res, 500, { error: String(e.message || e) }); }))
-  .listen(PORT, HOST, () => console.log('卡谋语工具 (本地版):  ' + ORIGIN));
+  .listen(PORT, HOST, () => {
+    console.log('卡谋语工具 (本地版):  ' + ORIGIN);
+    if (!fs.existsSync(path.join(ROOT, 'writer/data/rime-index.json'))) console.log('提示: 文稿编辑器的完整中文词库尚未生成, 输入法只能用基础字表。运行 python3 writer/scripts/build_rime_ice.py --output-dir writer/data');
+  });
 process.on('SIGINT', () => L.closeBrowser().finally(() => process.exit(0)));

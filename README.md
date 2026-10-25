@@ -15,7 +15,7 @@
 | **渲染库** | 一个 JS 文件，没有依赖；网页引入后用 `<kamo-text>` 或 `Kamotish.render()` 显示卡谋语 | [`web/kamotish.js`](web/kamotish.js) |
 | **浏览器插件** | 任何网页 (聊天、文档、论坛) 里的 `\kamotish{…}` 自动显示成卡谋语；输入框里实时预览 | [`extension/`](extension/)、安装包在 [`dist/`](dist/) |
 | **文档工具** | Markdown (含卡谋语和数学公式) 预览、定位并修改写错的卡谋语、导出 PDF。在线版打开即用；本地版另外支持按路径载入、批量导出、自动页码 | 页面 [`site/`](site/)，本地服务 [`tools/md2pdf/`](tools/md2pdf/) |
-| **文稿编辑器** | 输入法、逐字素编辑、直接导入 Markdown（含本地插图）、导出 `.kamodoc` / MD / PDF；与文档工具共用字形库 | [`writer/`](writer/) |
+| **文稿编辑器** | 仿 Google Docs 的文稿编辑：菜单栏、格式工具栏与快捷键、查找替换、链接、表格、图片；卡谋语输入法与逐字素编辑；直接导入 Markdown（含本地插图），导出 `.kamodoc` / MD / PDF | [`writer/`](writer/) |
 | **markdown-it 插件** | 在自己的 markdown-it 项目里支持 `\kamotish{…}` | [`web/markdown-it-kamotish.js`](web/markdown-it-kamotish.js) |
 | **字形制作工具** | 从手写原稿到最终字形、再到渲染库的全部 Python 脚本 | [`tools/`](tools/) |
 

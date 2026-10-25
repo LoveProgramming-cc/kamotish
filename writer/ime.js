@@ -78,10 +78,9 @@ window.KamoIME = (() => {
   }
   function exactChinese(s){
     const direct=directMatches(s).map(([txt])=>han(txt));
-    // Only fall back to xpinyin when Rime data for this initial is not yet loaded.
-    if(direct.length)return direct;
-    if(s in fallback) return fallback[s].slice(0,24).map(txt=>han(txt,'xpinyin 字表'));
-    return [];
+    // Rime Ice is ordered by frequency; xpinyin (code-point order) only adds rarer characters after it.
+    const extra=(fallback[s]||[]).filter(txt=>!direct.some(c=>c.value===txt)).map(txt=>han(txt,'xpinyin 字表'));
+    return direct.length?direct.concat(extra):extra.slice(0,24);
   }
   function prefixMatches(s, limit=5){
     if(s.length<2)return [];
