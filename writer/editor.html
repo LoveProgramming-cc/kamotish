@@ -62,6 +62,15 @@
   <span class="toolSpacer"></span>
   <div class="switch inputSwitch" role="group" aria-label="输入模式"><button id="kw-kamoMode" class="active" title="卡谋语输入法">卡谋语</button><button id="kw-nativeMode" title="系统输入法">系统</button></div>
 </section>
+<div id="kw-eqBar" class="eqBar" hidden role="toolbar" aria-label="公式工具栏">
+  <button id="kw-newEquation" title="新建公式">新建公式</button>
+  <button class="menuAnchor" data-menu="eq-greek" title="希腊字母"><span class="eqSample">αβΔ</span><span class="chevron">⌄</span></button>
+  <button class="menuAnchor" data-menu="eq-ops" title="运算符"><span class="eqSample">×÷∃</span><span class="chevron">⌄</span></button>
+  <button class="menuAnchor" data-menu="eq-rel" title="关系"><span class="eqSample">≤≠⊃</span><span class="chevron">⌄</span></button>
+  <button class="menuAnchor" data-menu="eq-struct" title="数学结构"><span class="eqSample">√()x²</span><span class="chevron">⌄</span></button>
+  <button class="menuAnchor" data-menu="eq-arrows" title="箭头"><span class="eqSample">←↑⇒</span><span class="chevron">⌄</span></button>
+  <button id="kw-eqClose" title="隐藏公式工具栏" aria-label="隐藏公式工具栏">×</button>
+</div>
 <div id="kw-findBar" class="findBar" hidden role="search" aria-label="查找和替换">
   <input id="kw-findInput" placeholder="查找" aria-label="查找" spellcheck="false">
   <span id="kw-findCount" class="findCount"></span>

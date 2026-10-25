@@ -240,6 +240,23 @@ function drawIme() {
   container.querySelector('.imeFoot').textContent = `1–4 一至四声 · ←→ 选择 · ↑↓ 翻页 · Enter/空格 确认 · ${page + 1}/${Math.max(1, Math.ceil(items.length / IME_PAGE_SIZE))} 页 · Esc`;
   placeIme();
 }
+// ↓/↑ move to the candidate below/above in the wrapped list; past the last/first row they turn the page.
+function moveCandidateRow(dir) {
+  const buttons = [...$('candidates').querySelectorAll('.candidate')], current = buttons.find(b => Number(b.dataset.i) === active);
+  if (current) {
+    const center = b => b.offsetLeft + b.offsetWidth / 2, rows = buttons.filter(b => dir > 0 ? b.offsetTop > current.offsetTop + 2 : b.offsetTop < current.offsetTop - 2);
+    if (rows.length) {
+      const rowTop = dir > 0 ? Math.min(...rows.map(b => b.offsetTop)) : Math.max(...rows.map(b => b.offsetTop));
+      const row = rows.filter(b => Math.abs(b.offsetTop - rowTop) <= 2);
+      active = Number(row.reduce((a, b) => Math.abs(center(b) - center(current)) < Math.abs(center(a) - center(current)) ? b : a).dataset.i);
+      drawIme(); return;
+    }
+  }
+  const page = Math.floor(active / IME_PAGE_SIZE) + dir, pages = Math.max(1, Math.ceil(items.length / IME_PAGE_SIZE));
+  if (page < 0 || page >= pages) return;
+  active = dir > 0 ? page * IME_PAGE_SIZE : Math.min(items.length - 1, page * IME_PAGE_SIZE + IME_PAGE_SIZE - 1);
+  drawIme();
+}
 function chooseTone(tone) {
   const selected = items[active], target = selected && ['glyph', 'phon'].includes(selected.type) ? selected : items.find(c => ['glyph', 'phon'].includes(c.type));
   if (!target) return;
@@ -258,11 +275,7 @@ function imeKeyDown(view, e) {
     if (e.ctrlKey || e.metaKey || e.altKey) { stopIme(); return false; }
     if (e.key === 'Escape') { stopIme(); return true; }
     if (e.key === 'Backspace') { composing = composing.slice(0, -1); drawIme(); return true; }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      const pages = Math.max(1, Math.ceil(items.length / IME_PAGE_SIZE));
-      const page = Math.max(0, Math.min(pages - 1, Math.floor(active / IME_PAGE_SIZE) + (e.key === 'ArrowDown' ? 1 : -1)));
-      active = Math.min(items.length - 1, page * IME_PAGE_SIZE + active % IME_PAGE_SIZE); drawIme(); return true;
-    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { moveCandidateRow(e.key === 'ArrowDown' ? 1 : -1); return true; }
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       const start = Math.floor(active / IME_PAGE_SIZE) * IME_PAGE_SIZE, count = Math.min(IME_PAGE_SIZE, items.length - start);
       active = start + (active - start + (e.key === 'ArrowRight' ? 1 : count - 1)) % Math.max(1, count); drawIme(); return true;
@@ -399,22 +412,6 @@ function markdownRules() {
     wrappingInputRule(/^(\d+)[.)]\s$/, nodes.ordered_list, m => ({ order: +m[1] }), (m, n) => n.childCount + n.attrs.order === +m[1]),
     wrappingInputRule(/^\s*>\s$/, nodes.blockquote),
     textblockTypeInputRule(/^```$/, nodes.code_block),
-    // $$ on an empty line starts a formula block; $$…$$ inside a line becomes a block too.
-    new InputRule(/^\$\$$/, (state, match, start) => {
-      const $start = state.doc.resolve(start); if ($start.parent.type !== nodes.paragraph) return null;
-      const tr = state.tr.replaceRangeWith($start.before(), $start.after(), nodes.math_display.create());
-      const pos = tr.mapping.map($start.before(), 1) - 1, at = tr.doc.nodeAt(pos)?.type === nodes.math_display ? pos : $start.before();
-      return tr.setSelection(NodeSelection.create(tr.doc, at)).setMeta('openMath', at);
-    }),
-    new InputRule(/(^|[^$\\])\$\$([^$\n]+)\$\$$/, (state, match, start, end) => {
-      const tex = match[2].trim(); if (!tex) return null;
-      return state.tr.replaceWith(start + match[1].length, end, nodes.math_display.create({ tex }));
-    }),
-    // $…$ becomes an inline formula. No space just inside the dollars, so prices like $5 and $6 stay text.
-    new InputRule(/(^|[^$\\])\$([^\s$](?:[^$\n]*[^\s$\\])?)\$$/, (state, match, start, end) => {
-      const tr = state.tr.replaceWith(start + match[1].length, end, nodes.math_inline.create({ tex: match[2] }));
-      return tr;
-    }),
     new InputRule(/^(?:---|\*\*\*|___)$/, (state, match, start, end) => {
       const $start = state.doc.resolve(start); if ($start.parent.type !== nodes.paragraph || $start.depth !== 1) return null;
       return state.tr.replaceRangeWith($start.before(), $start.after(), nodes.horizontal_rule.create()).insert($start.before() + 1, nodes.paragraph.create());
@@ -522,7 +519,13 @@ function drawCaret() {
   const atom = before?.type === nodes.kamo ? before : after?.type === nodes.kamo ? after : null; if (!atom) return;
   const dom = view.nodeDOM(before === atom ? $pos.pos - before.nodeSize : $pos.pos); if (!dom?.getBoundingClientRect) return;
   const rect = dom.getBoundingClientRect(), bounds = workspace.getBoundingClientRect();
-  const height = parseFloat(getComputedStyle(dom).fontSize) * zoom * 1.15, x = before === atom ? rect.right : rect.left, y = rect.bottom - height;
+  // Span the drawn glyph (a stacked syllable can be two lines tall), at least one text line.
+  let top = Infinity, bottom = -Infinity;
+  for (const svg of dom.querySelectorAll('svg')) { const r = svg.getBoundingClientRect(); top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom); }
+  if (!(bottom > top)) { top = rect.top; bottom = rect.bottom; }
+  const line = parseFloat(getComputedStyle(dom).fontSize) * zoom * 1.15;
+  if (bottom - top < line) { const mid = (top + bottom) / 2; top = mid - line / 2; bottom = mid + line / 2; }
+  const x = before === atom ? rect.right : rect.left, y = top, height = bottom - top;
   if (y + height < bounds.top || y > bounds.bottom || x < bounds.left || x > bounds.right) return;
   visualCaret.style.cssText = `left:${x - 1}px;top:${y}px;height:${height}px`; visualCaret.hidden = false; editor.classList.add('atom-caret');
 }
@@ -625,11 +628,11 @@ function menuEntries(type) {
     case 'edit': return [
       item('撤销', () => run(undo), { key: 'Mod-z', disabled: !undoDepth(s) }), item('重做', () => run(redo), { key: 'Shift-Mod-z', disabled: !redoDepth(s) }), sep,
       item('剪切', () => { view.focus(); document.execCommand('cut'); }, { key: 'Mod-x' }), item('复制', () => { view.focus(); document.execCommand('copy'); }, { key: 'Mod-c' }),
-      item('粘贴', () => notify((isMac ? '⌘' : 'Ctrl+') + 'V 粘贴：浏览器不允许菜单直接读取剪贴板'), { key: 'Mod-v' }), sep,
+      item('粘贴', () => pasteFromClipboard(false), { key: 'Mod-v' }), item('粘贴为纯文本', () => pasteFromClipboard(true), { key: 'Shift-Mod-v' }), sep,
       item('全选', () => run(PM.commands.selectAll), { key: 'Mod-a' }), item('查找和替换', () => openFind(true), { key: 'Shift-Mod-h' })];
     case 'insert': return [
       item('图片…', chooseImages, { hint: '从本机选择，可多选；也可直接粘贴或拖入' }), item('表格…', openTableDialog), item('链接…', openLinkDialog, { key: 'Mod-k' }),
-      item('卡谋语…', openInsert, { hint: '字素与拟素源码' }), item('公式（行内）', () => insertMath(false), { hint: '也可直接输入 $公式$' }), item('公式块', () => insertMath(true), { hint: '也可在空行输入 $$' }), sep, item('水平线', () => run(insertHr)), item('换行（不分段）', () => run(insertHardBreak), { key: 'Shift-Enter' })];
+      item('卡谋语…', openInsert, { hint: '字素与拟素源码' }), item('公式（行内）', () => insertMath(false)), item('公式块', () => insertMath(true)), sep, item('水平线', () => run(insertHr)), item('换行（不分段）', () => run(insertHardBreak), { key: 'Shift-Enter' })];
     case 'format': {
       const entries = [heading('文字'),
         item('加粗', () => run(toggle('bold')), { key: 'Mod-b', checked: markActive(s, marks.bold) }), item('斜体', () => run(toggle('italic')), { key: 'Mod-i', checked: markActive(s, marks.italic) }),
@@ -648,7 +651,8 @@ function menuEntries(type) {
     }
     case 'tools': return [item('字数统计', openCount, { key: 'Shift-Mod-c' }), item('查找和替换', () => openFind(true), { key: 'Shift-Mod-h' }), sep,
       item('卡谋语输入法', () => setMode('kamo'), { checked: mode === 'kamo' }), item('系统输入法', () => setMode('native'), { checked: mode === 'native' }), sep,
-      item('显示文稿大纲', toggleSidebar, { checked: !layout.classList.contains('collapsed') }), item('键盘快捷键', openShortcuts, { key: 'Mod-/' })];
+      item('显示文稿大纲', toggleSidebar, { checked: !layout.classList.contains('collapsed') }),
+      item('显示公式工具栏', () => { if ($('eqBar').hidden) showEqBar(true); else { eqBarDismissed = true; $('eqBar').hidden = true; } }, { checked: !$('eqBar').hidden }), item('键盘快捷键', openShortcuts, { key: 'Mod-/' })];
     case 'block': return BLOCK_STYLES.map(([v, label]) => item(label, () => applyBlockStyle(v), { checked: currentBlockValue(s) === v, className: 'style-' + v }));
     case 'font': { const cur = marksAtSelection(s, marks.fontFamily)[0]?.attrs.family || ''; return FONTS.map(([v, label, css]) => item(label, () => run(setMark(marks.fontFamily, v ? { family: v } : null)), { checked: fontKey(cur) === fontKey(v), fontCss: css })); }
     case 'size': { const cur = selectionSizes(s); return SIZES.map(v => item(String(v), () => applySize(v), { checked: cur.length === 1 && cur[0] === v })); }
@@ -656,9 +660,21 @@ function menuEntries(type) {
     case 'zoom': return [.5, .75, .9, 1, 1.25, 1.5, 2].map(z => item(Math.round(z * 100) + '%', () => setZoom(z), { checked: !automaticZoom && Math.abs(zoom - z) < .01 }))
       .concat([item('适合宽度', () => { automaticZoom = true; localStorage.removeItem('kamotish-writer-zoom'); fitWidth(); }, { checked: automaticZoom })]);
     case 'context': {
-      const entries = [item('剪切', () => { view.focus(); document.execCommand('cut'); }, { key: 'Mod-x', disabled: s.selection.empty }), item('复制', () => { view.focus(); document.execCommand('copy'); }, { key: 'Mod-c', disabled: s.selection.empty }),
-        sep, item('插入链接', openLinkDialog, { key: 'Mod-k' }), item('清除格式', () => run(clearFormatting), { key: 'Mod-\\' })];
-      return inTable(s) ? tableItems().concat([sep], entries) : entries;
+      const node = s.selection instanceof NodeSelection ? s.selection.node : null, entries = [];
+      if (node?.type === nodes.kamo && node.attrs.kind === 'glyph') entries.push(heading('字素声调'), ...[1, 2, 3, 4].map(t => item(M.NAMED_TONES[t - 1], () => setTone(s.selection.from, t === 1 ? '' : String(t)), { key: String(t), checked: (node.attrs.tone || '1') === String(t) })), sep);
+      if (node?.type === nodes.math_inline || node?.type === nodes.math_display) entries.push(item('编辑公式', () => openMathEditor(s.selection.from), { key: 'Enter' }), sep);
+      if (node?.type === nodes.image && node.attrs.width) entries.push(item('恢复原始大小', () => run((st, d) => { d(st.tr.setNodeMarkup(st.selection.from, null, Object.assign({}, node.attrs, { width: null }))); return true; })), sep);
+      if (inTable(s)) entries.push(...tableItems(), sep);
+      const link = markRange(s, marks.link, s.selection.from);
+      entries.push(
+        item('剪切', () => { view.focus(); document.execCommand('cut'); }, { key: 'Mod-x', disabled: s.selection.empty }),
+        item('复制', () => { view.focus(); document.execCommand('copy'); }, { key: 'Mod-c', disabled: s.selection.empty }),
+        item('粘贴', () => pasteFromClipboard(false), { key: 'Mod-v' }), item('粘贴为纯文本', () => pasteFromClipboard(true), { key: 'Shift-Mod-v' }),
+        item('删除', () => run((st, d) => { d(st.tr.deleteSelection()); return true; }), { disabled: s.selection.empty }), sep,
+        link ? item('编辑链接', openLinkDialog, { key: 'Mod-k' }) : item('插入链接', openLinkDialog, { key: 'Mod-k' }));
+      if (link) entries.push(item('移除链接', () => run((st, d) => { d(st.tr.removeMark(link.from, link.to, marks.link)); return true; })));
+      entries.push(item('插入公式', () => insertMath(false)), item('清除格式', () => run(clearFormatting), { key: 'Mod-\\' }), sep, item('全选', () => run(PM.commands.selectAll), { key: 'Mod-a' }));
+      return entries;
     }
   }
   return [];
@@ -683,6 +699,7 @@ function openMenu(anchor, type, point) {
   anchor?.setAttribute('aria-expanded', 'true');
   menu.replaceChildren(); menu.className = 'dropdown menu-' + type;
   if (type === 'color' || type === 'highlight') menu.append(swatches(type));
+  else if (type.startsWith('eq-')) menu.append(eqGrid(type));
   else for (const entry of menuEntries(type)) {
     if (entry.separator) { const s = document.createElement('div'); s.className = 'menuSeparator'; menu.append(s); continue; }
     if (entry.heading) { const h = document.createElement('div'); h.className = 'menuHeading'; h.textContent = entry.heading; menu.append(h); continue; }
@@ -706,19 +723,36 @@ menu.addEventListener('keydown', e => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); btns[(index + (e.key === 'ArrowDown' ? 1 : btns.length - 1)) % btns.length]?.focus(); }
   else if (e.key === 'Escape') { const anchor = menuAnchor; closeDropdown(); anchor ? anchor.focus() : view.focus(); }
 });
+// Right-click opens the editor's own menu (⇧ + right-click keeps the browser menu).
 function openContextMenu(e) {
-  if (!inTable(view.state)) return false;
-  const pos = view.posAtCoords({ left: e.clientX, top: e.clientY });
-  if (pos && view.state.selection.empty) view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos.pos)));
-  if (!inTable(view.state)) return false;
-  e.preventDefault(); openMenu(null, 'context', { x: e.clientX, y: e.clientY }); return true;
+  if (e.shiftKey || !hasDocument) return false;
+  const hit = view.posAtCoords({ left: e.clientX, top: e.clientY }), sel = view.state.selection;
+  if (hit) {
+    const atom = hit.inside >= 0 ? view.state.doc.nodeAt(hit.inside) : null;
+    if (atom && (atom.type === nodes.kamo || atom.type === nodes.image || atom.type === nodes.math_inline || atom.type === nodes.math_display)) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, hit.inside)));
+    else if (sel.empty || hit.pos < sel.from || hit.pos > sel.to) view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, hit.pos)));
+  }
+  e.preventDefault(); view.focus(); openMenu(null, 'context', { x: e.clientX, y: e.clientY }); return true;
+}
+async function pasteFromClipboard(plain) {
+  view.focus();
+  try {
+    if (!plain && navigator.clipboard?.read) {
+      for (const entry of await navigator.clipboard.read()) {
+        const image = entry.types.find(t => t.startsWith('image/'));
+        if (entry.types.includes('text/html')) { view.pasteHTML(await (await entry.getType('text/html')).text()); return; }
+        if (image) { const blob = await entry.getType(image); await insertImageFiles([new File([blob], 'image.' + image.split('/')[1], { type: image })]); return; }
+      }
+    }
+    view.pasteText(await navigator.clipboard.readText());
+  } catch { notify('浏览器没有允许读取剪贴板，请按 ' + (isMac ? '⌘' : 'Ctrl+') + 'V 粘贴'); }
 }
 document.addEventListener('pointerdown', e => {
   container.querySelectorAll('.document-actions[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
   if (!e.target.closest('#kw-dropdown,.menuAnchor')) closeDropdown();
   if (!e.target.closest('#kw-tonePicker,.kw-unit')) closeTone();
   if (!e.target.closest('#kw-ime,#kw-editor')) stopIme();
-  if (mathPos != null && !e.target.closest('#kw-mathEditor')) closeMathEditor(true);
+  if (mathPos != null && !e.target.closest('#kw-mathEditor,#kw-eqBar') && !(e.target.closest('#kw-dropdown') && dropdownType.startsWith('eq-'))) closeMathEditor(true);
 });
 
 /* ---------- Toolbar actions ---------- */
@@ -887,6 +921,44 @@ function closeMathEditor(commit) {
   tr.setSelection(PM.state.Selection.near(tr.doc.resolve(Math.min(after, tr.doc.content.size))));
   view.dispatch(closeHistory(tr.scrollIntoView())); view.focus();
 }
+/* Equation toolbar: appears after a formula is inserted, like Google Docs. */
+const EQ_GROUPS = {
+  'eq-greek': '\\alpha \\beta \\gamma \\delta \\epsilon \\varepsilon \\zeta \\eta \\theta \\vartheta \\iota \\kappa \\lambda \\mu \\nu \\xi \\pi \\rho \\sigma \\tau \\upsilon \\phi \\varphi \\chi \\psi \\omega \\Gamma \\Delta \\Theta \\Lambda \\Xi \\Pi \\Sigma \\Upsilon \\Phi \\Psi \\Omega',
+  'eq-ops': '\\times \\div \\pm \\mp \\cdot \\circ \\ast \\star \\cup \\cap \\setminus \\oplus \\otimes \\forall \\exists \\nexists \\neg \\land \\lor \\partial \\nabla \\infty \\emptyset \\angle \\degree \\sum \\prod \\int \\oint \\ldots \\cdots',
+  'eq-rel': '< > \\le \\ge \\ne \\approx \\equiv \\sim \\simeq \\cong \\propto \\ll \\gg \\in \\notin \\ni \\subset \\supset \\subseteq \\supseteq \\parallel \\perp \\mid',
+  'eq-arrows': '\\leftarrow \\rightarrow \\uparrow \\downarrow \\leftrightarrow \\Leftarrow \\Rightarrow \\Leftrightarrow \\mapsto \\longrightarrow \\longleftarrow \\nearrow \\searrow \\nwarrow \\swarrow'
+};
+let eqBarDismissed = false;
+function showEqBar(force) { if (force) eqBarDismissed = false; if (!eqBarDismissed) $('eqBar').hidden = false; }
+function docHasMath() { let found = false; view.state.doc.descendants(n => { if (found) return false; if (n.type === nodes.math_inline || n.type === nodes.math_display) found = true; }); return found; }
+$('eqClose').onclick = () => { eqBarDismissed = true; $('eqBar').hidden = true; };
+$('newEquation').addEventListener('mousedown', e => e.preventDefault());
+$('newEquation').onclick = () => { if (mathPos != null) closeMathEditor(true); insertMath(false); };
+function eqGrid(type) {
+  const box = document.createElement('div'); box.className = 'eqGrid';
+  const entries = type === 'eq-struct' ? MATH_TEMPLATES.map(([sample, insert, label]) => [sample, insert, label]) : EQ_GROUPS[type].split(' ').map(t => [t, t + ' ', t]);
+  for (const [sample, insert, label] of entries) {
+    const b = document.createElement('button'); b.type = 'button'; b.title = label; renderMath(b, sample, false);
+    b.onmousedown = e => e.preventDefault(); b.onclick = () => { closeDropdown(); eqInsert(insert); }; box.append(b);
+  }
+  return box;
+}
+function insertIntoSource(text) {
+  const src = $('mathSource'), start = src.selectionStart, end = src.selectionEnd;
+  src.setRangeText(text, start, end, 'end');
+  const hole = text.indexOf('{}');
+  if (hole >= 0) src.setSelectionRange(start + hole + 1, start + hole + 1);
+  else if (text.includes('  ')) { const p = start + text.indexOf('  ') + 1; src.setSelectionRange(p, p); }
+  src.focus(); updateMathPreview();
+}
+function eqInsert(text) {
+  if (mathPos == null) {
+    const sel = view.state.selection;
+    if (sel instanceof NodeSelection && (sel.node.type === nodes.math_inline || sel.node.type === nodes.math_display)) openMathEditor(sel.from);
+    else insertMath(false);
+  }
+  if (mathPos != null) insertIntoSource(text);
+}
 function insertMath(display) {
   const state = view.state, { from, to, empty } = state.selection;
   const tex = empty ? '' : state.doc.textBetween(from, to, ' ');
@@ -895,7 +967,7 @@ function insertMath(display) {
   let pos = null; tr.doc.nodesBetween(Math.max(0, tr.mapping.map(from, -1) - 2), Math.min(tr.doc.content.size, tr.mapping.map(from, -1) + 3), (n, p) => { if (pos == null && n.type === node.type && n.attrs.tex === tex) pos = p; });
   if (pos == null) return;
   view.dispatch(closeHistory(tr.setSelection(NodeSelection.create(tr.doc, pos))));
-  openMathEditor(pos);
+  showEqBar(true); openMathEditor(pos);
 }
 $('mathSource').addEventListener('input', () => {
   updateMathPreview();
@@ -907,15 +979,7 @@ $('mathSource').addEventListener('keydown', e => {
   else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMathEditor(false); }
 });
 container.querySelector('.mathPaletteWrap').addEventListener('mousedown', e => e.preventDefault());
-container.querySelector('.mathPaletteWrap').addEventListener('click', e => {
-  const b = e.target.closest('[data-insert]'); if (!b) return;
-  const src = $('mathSource'), text = b.dataset.insert, start = src.selectionStart, end = src.selectionEnd;
-  src.setRangeText(text, start, end, 'end');
-  const hole = text.indexOf('{}'), inner = text.indexOf('{ }');
-  if (hole >= 0) src.setSelectionRange(start + hole + 1, start + hole + 1);
-  else if (text.includes('  ')) { const p = start + text.indexOf('  ') + 1; src.setSelectionRange(p, p); }
-  src.focus(); updateMathPreview();
-});
+container.querySelector('.mathPaletteWrap').addEventListener('click', e => { const b = e.target.closest('[data-insert]'); if (b) insertIntoSource(b.dataset.insert); });
 $('mathDone').onclick = () => closeMathEditor(true);
 $('mathDelete').onclick = () => { $('mathSource').value = ''; closeMathEditor(true); };
 
@@ -933,7 +997,7 @@ function openShortcuts() {
   const groups = [['常用', [['撤销 / 重做', 'Mod-z', 'Shift-Mod-z'], ['保存', 'Mod-s'], ['查找 / 替换', 'Mod-f', 'Shift-Mod-h'], ['字数统计', 'Shift-Mod-c'], ['插入链接', 'Mod-k'], ['换行（不分段）', 'Shift-Enter']]],
     ['文字', [['加粗', 'Mod-b'], ['斜体', 'Mod-i'], ['下划线', 'Mod-u'], ['删除线', 'Shift-Mod-x'], ['上标 / 下标', 'Mod-.', 'Mod-,'], ['行内代码', 'Mod-e'], ['增大 / 减小字号', 'Shift-Mod-.', 'Shift-Mod-,'], ['清除格式', 'Mod-\\']]],
     ['段落', [['正文 / 标题 1–3', 'Mod-Alt-0', 'Mod-Alt-1'], ['左 / 中 / 右 / 两端对齐', 'Shift-Mod-l', 'Shift-Mod-e'], ['编号 / 项目符号列表', 'Shift-Mod-7', 'Shift-Mod-8'], ['增加 / 减少缩进', 'Mod-]', 'Mod-['], ['列表内缩进', 'Tab', 'Shift-Tab']]],
-    ['自动格式', [['# 空格 → 标题；- 空格 → 列表；1. 空格 → 编号；> 空格 → 引用；--- → 水平线'], ['$公式$ → 行内公式；空行输入 $$ → 公式块；单击公式可编辑']]],
+    ['自动格式', [['# 空格 → 标题；- 空格 → 列表；1. 空格 → 编号；> 空格 → 引用；--- → 水平线'], ['插入 → 公式，或工具栏 ∑；单击公式可编辑']]],
     ['卡谋语输入', [['输入拼音后 1–4 选声调；← → 候选；↑ ↓ 翻页；空格/Enter 确认'], ['选中字素后按 1–4 修改声调']]]];
   $('shortcutList').innerHTML = groups.map(([title, rows]) => `<h3>${title}</h3><dl>${rows.map(([label, ...keys]) => `<dt>${safe(label)}</dt><dd>${keys.map(k => '<kbd>' + safe(keyLabel(k)) + '</kbd>').join(' ')}</dd>`).join('')}</dl>`).join('');
   $('shortcutDialog').hidden = false; $('shortcutClose').focus();
@@ -1026,6 +1090,7 @@ function setDoc(doc) {
   view.updateState(newState(doc)); stopIme(); closeTone(); closeDropdown();
   if (!$('findBar').hidden) setFind({ query: $('findInput').value, caseSensitive: $('findCase').checked, index: 0 });
   refreshOutline(); updateToolbar(); drawCaret();
+  eqBarDismissed = false; $('eqBar').hidden = !docHasMath();
 }
 function exportNative() { return { format: 'Kamotish Writer', schemaVersion: 2, id: docId, title: $('docTitle').value, createdBy: 'Kamotish Writer 3', savedAt: new Date().toISOString(), page: { size: 'A4' }, content: M.docToAst(view.state.doc) }; }
 function importNative(doc) {

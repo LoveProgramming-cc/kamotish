@@ -130,6 +130,7 @@
 .writer-root svg.kamo { display:inline-block; width:1em; height:1em; vertical-align:-.14em; overflow:visible; margin:0 .04em; }
 .writer-root .kw-unit { display:inline-block; vertical-align:baseline; white-space:nowrap; border-radius:2px; cursor:text; position:relative; }
 .writer-root .kw-unit svg { pointer-events:none; }
+.writer-root .kw-unit { background-color:var(--kw-highlight, transparent); }
 .writer-root .kw-unit.is-selected, .writer-root .kw-unit.ProseMirror-selectednode { background:#4189d752; box-shadow:0 0 0 1px #4189d738; }
 .writer-root .kw-unit:hover { background:#4189d717; }
 .writer-root .kw-hidden { display:inline; width:0; height:0; font-size:0; overflow:hidden; }
@@ -160,6 +161,17 @@
 .writer-root .mathFoot span { flex:1; }
 .writer-root .mathFoot button { border-color:var(--line); padding:4px 12px; }
 .writer-root .mathFoot .primary { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); }
+
+.writer-root .eqBar { display:flex; align-items:center; gap:2px; margin:-2px 12px 8px; padding:3px 8px; min-height:36px; border-radius:18px; background:color-mix(in srgb, var(--accent) 7%, var(--panel)); flex-shrink:0; overflow-x:auto; }
+.writer-root .eqBar[hidden] { display:none !important; }
+.writer-root .eqBar button { height:28px; padding:0 8px; display:flex; align-items:center; gap:4px; border-radius:4px; font-size:13px; flex-shrink:0; }
+.writer-root .eqBar #kw-newEquation { color:var(--muted); }
+.writer-root .eqBar .eqSample { font-family:'Times New Roman',serif; font-size:15px; letter-spacing:1px; }
+.writer-root .eqBar #kw-eqClose { margin-left:auto; font-size:16px; }
+.writer-root .eqGrid { display:grid; grid-template-columns:repeat(8,34px); gap:2px; padding:4px 8px; }
+.writer-root .menu-eq-struct .eqGrid { grid-template-columns:repeat(4,64px); }
+.writer-root .eqGrid button { height:32px; padding:0; display:grid; place-items:center; border-radius:4px; font-size:13px; overflow:hidden; }
+.writer-root .eqGrid .katex { font-size:1em; }
 
 /* Popups */
 .writer-root .dropdown, .writer-root .tonePicker, .writer-root .ime, .writer-root .linkBubble { position:fixed; z-index:150; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--fg); box-shadow:0 4px 8px 3px #3c404326, 0 1px 3px #3c40434d; padding:6px 0; }

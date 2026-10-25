@@ -218,7 +218,8 @@ window.KamotishWriterModel = (() => {
       highlight: {
         attrs: { color: {} },
         parseDOM: [{ style: 'background-color', getAttrs: v => plainColor(v) ? { color: v } : false }],
-        toDOM: m => ['span', { style: 'background-color:' + m.attrs.color }, 0]
+        // The variable lets a tall Kamotish atom inside take the colour over its full height.
+        toDOM: m => ['span', { style: 'background-color:' + m.attrs.color + ';--kw-highlight:' + m.attrs.color }, 0]
       },
       fontFamily: {
         attrs: { family: {} },
