@@ -125,7 +125,11 @@ window.KamoIME = (() => {
     let phones=null;
     if(multi && split.every(phonValid))phones=split.join('-');
     else if(!multi && phonValid(s))phones=s;
-    if(multi){ if(phones)add(phon(phones)); }
+    if(multi){
+      // A pinyin split must not hide a valid single syllable: tee = t+e+e (not te-e), hee, neen, kaa ...
+      if(phonValid(s))add(phon(s));
+      if(phones)add(phon(phones));
+    }
     else {
       // Keep the four grapheme tones together, followed by the phonetic candidate.
       if(namesSet.has(s))add(glyph(s));

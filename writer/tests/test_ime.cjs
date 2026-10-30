@@ -33,4 +33,9 @@ assert.equal(ime.candidates('ni')[0].value,'ni'); // No grapheme, phoneme first
 assert.ok(cn('zhongguo').includes('中国'));
 assert.equal(ime.candidates('nou')[0].value,'\\nou');
 assert.ok(!ime.candidates('no').some(c=>c.type==='glyph'));
+// a valid single syllable that pinyin could also split must come first, the split form after it
+for (const [s, split] of [['tee','te-e'],['hee','he-e'],['neen','ne-en'],['kaa','ka-a']]) {
+  const phons=Array.from(ime.candidates(s).filter(c=>c.type==='phon'),c=>c.value); // copy out of the vm realm
+  assert.deepEqual(phons,[s,split],s);
+}
 console.log('IME candidate priority, polyphony, Rime phrase and sentence composition tests passed');
